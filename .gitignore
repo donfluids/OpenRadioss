@@ -1,4 +1,5 @@
 cbuild_*
+build_cfd*
 vs_build*
 .vs
 exec
