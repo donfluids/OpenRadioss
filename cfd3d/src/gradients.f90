@@ -3,7 +3,9 @@
 ! BC ghost states at physical-boundary faces (half-step stencil).
 module gradients
    use kinds,         only : wp
-   use constants,     only : NVAR, NPRIM, IP_RHO, IP_U, IP_V, IP_W, IP_P
+   use constants,     only : NVAR, NPRIM, IP_RHO, IP_U, IP_V, IP_W, IP_P, &
+                             BC_SLIP_WALL, BC_SYMMETRY, BC_SUPERSONIC_OUTLET, &
+                             BC_FARFIELD
    use mesh_types,    only : t_mesh
    use fields,        only : t_state
    use bc_types,      only : t_bc_data
@@ -15,6 +17,20 @@ module gradients
    public :: compute_primitives, compute_gradients
 
 contains
+
+   ! Skip boundary types that don't carry meaningful gradient information
+   ! (slip walls reflect the normal velocity, producing spurious LSQ
+   ! gradients at edge cells; outflow boundaries simply copy state).
+   pure function bc_contributes_to_gradient(bc_type) result(yes)
+      integer, intent(in) :: bc_type
+      logical :: yes
+      select case (bc_type)
+      case (BC_SLIP_WALL, BC_SYMMETRY, BC_SUPERSONIC_OUTLET, BC_FARFIELD)
+         yes = .false.
+      case default
+         yes = .true.
+      end select
+   end function bc_contributes_to_gradient
 
    ! Fill s%W (primitives) from s%U (conservative) for ALL cells incl. ghosts.
    subroutine compute_primitives(mesh, s)
@@ -58,11 +74,12 @@ contains
             if (c_n <= mesh%nc_internal) &
                call accumulate(A_cells(:,:,c_n), b_cells(:,:,c_n), -dr, w2, -dW)
          else
-            ! Physical boundary face. The BC ghost state lies one cell-thickness
-            ! across the wall (face midpoint = (cell + ghost)/2 in our convention),
-            ! so the LSQ contribution uses the face-midpoint primitive — i.e.
-            ! 0.5*(W_cell + W_ghost) at dr = face_centroid - cell_centroid.
+            ! Physical boundary face. Only include in the LSQ stencil for BC
+            ! types that carry meaningful information (Dirichlet, no-slip,
+            ! supersonic inlet). Slip walls / symmetry / outflow are excluded
+            ! to avoid the reflection-induced spurious normal gradient.
             ip = mesh%face_patch(f)
+            if (.not. bc_contributes_to_gradient(mesh%patches(ip)%bc_type)) cycle
             block
                real(wp) :: UR(NVAR), QL(NVAR), rho_b, u_b, v_b, w_b, p_b
                QL = s%U(:, c_o)

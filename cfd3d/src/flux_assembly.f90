@@ -1,6 +1,9 @@
 module flux_assembly
    use kinds,          only : wp
-   use constants,      only : NVAR, NPRIM, IP_RHO, IP_U, IP_V, IP_W, IP_P
+   use constants,      only : NVAR, NPRIM, IP_RHO, IP_U, IP_V, IP_W, IP_P, &
+                              BC_SLIP_WALL, BC_SYMMETRY, BC_SUPERSONIC_OUTLET, &
+                              BC_SUPERSONIC_INLET, BC_FARFIELD, &
+                              BC_NO_SLIP_WALL, BC_DIRICHLET
    use mesh_types,     only : t_mesh, t_patch
    use bc_types,       only : t_bc_data
    use bc_apply,       only : ghost_state
@@ -18,6 +21,22 @@ module flux_assembly
    public :: residual_pure_interior, residual_partition, residual_boundary
 
 contains
+
+   ! Slip and symmetry walls are inviscid by construction — no shear can be
+   ! transmitted by the wall. Returning .false. for these prevents the LSQ
+   ! reflection trick from manufacturing a spurious viscous stress.
+   pure function bc_has_viscous_flux(bc_type) result(yes)
+      integer, intent(in) :: bc_type
+      logical :: yes
+      select case (bc_type)
+      case (BC_SLIP_WALL, BC_SYMMETRY, BC_SUPERSONIC_OUTLET, BC_FARFIELD)
+         yes = .false.
+      case (BC_NO_SLIP_WALL, BC_DIRICHLET, BC_SUPERSONIC_INLET)
+         yes = .true.
+      case default
+         yes = .true.
+      end select
+   end function bc_has_viscous_flux
 
    ! MPI-aware orchestrator. (Halos for U and grads must already be
    ! exchanged by the time-integration driver; this routine only handles
@@ -145,9 +164,20 @@ contains
          end if
          call cons_from_prim(W_L(IP_RHO), W_L(IP_U), W_L(IP_V), W_L(IP_W), W_L(IP_P), Q_L)
          call ghost_state(mesh%patches(ip)%bc_type, bc_dat(ip), Q_L, nrml, Q_R)
-         Fflx = hllc_flux(Q_L, Q_R, nrml)
+         select case (mesh%patches(ip)%bc_type)
+         case (BC_SLIP_WALL, BC_SYMMETRY)
+            ! Pure pressure flux: F = (0, p*n_x, p*n_y, p*n_z, 0). Avoids the
+            ! spurious HLLC compression wave from the velocity-reflection ghost.
+            Fflx(1) = 0.0_wp
+            Fflx(2) = W_L(IP_P) * nrml(1)
+            Fflx(3) = W_L(IP_P) * nrml(2)
+            Fflx(4) = W_L(IP_P) * nrml(3)
+            Fflx(5) = 0.0_wp
+         case default
+            Fflx = hllc_flux(Q_L, Q_R, nrml)
+         end select
 
-         if (viscous) then
+         if (viscous .and. bc_has_viscous_flux(mesh%patches(ip)%bc_type)) then
             call prim_from_cons(Q_R, rho_b, u_b, v_b, w_b, p_b)
             W_R(IP_RHO) = rho_b; W_R(IP_U) = u_b; W_R(IP_V) = v_b
             W_R(IP_W)   = w_b;   W_R(IP_P) = p_b
