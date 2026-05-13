@@ -1,16 +1,20 @@
 ! Integration acceptance test: 3D Sod shock tube vs. exact Riemann solution.
+! MPI-aware: runs identically under -np 1 (serial) and -np N (parallel).
 program test_sod_shock_tube
    use, intrinsic :: iso_fortran_env, only : error_unit
+   use mpi_f08
    use kinds,            only : wp
    use constants,        only : GAMMA, NVAR
    use mesh_types,       only : t_mesh
-   use mesh_module,      only : load_mesh
+   use partition,        only : partition_and_load
+   use halo_exchange,    only : halo_init_persistent, halo_free_persistent
    use fields,           only : t_state, alloc_state, free_state
    use bc_types,         only : t_bc_data
    use eos_ideal_gas,    only : prim_from_cons
    use time_integration, only : compute_dt, rk3_step
    use solver_control,   only : t_run_params, read_namelist
    use solver_driver,    only : assign_patch_bcs, set_initial_condition
+   use mpi_runtime,      only : t_mpi_ctx, mpi_init_ctx, mpi_finalize_ctx
    implicit none
 
    character(len=512) :: nml_path
@@ -19,84 +23,112 @@ program test_sod_shock_tube
    type(t_mesh)       :: mesh
    type(t_state)      :: s
    type(t_bc_data), allocatable :: bc_dat(:)
+   type(t_mpi_ctx)    :: ctx
    real(wp) :: t, dt, x, x_d
    real(wp) :: rho_n, u_n, v_n, w_n, p_n
    real(wp) :: rho_e, u_e, p_e
+   real(wp) :: err_rho_l, err_u_l, err_p_l
+   real(wp) :: tot_rho_l, tot_u_l, tot_p_l
    real(wp) :: err_rho, err_u, err_p
    real(wp) :: tot_rho, tot_u, tot_p
    real(wp) :: rel_rho, rel_u, rel_p
    integer :: c, step
    integer :: fails
 
+   call mpi_init_ctx(ctx)
+
    nargs = command_argument_count()
    if (nargs < 1) then
-      write(error_unit,'(A)') 'usage: test_sod_shock_tube <input.nml>'
+      if (ctx%is_root) write(error_unit,'(A)') 'usage: test_sod_shock_tube <input.nml>'
+      call mpi_finalize_ctx()
       stop 1
    end if
    call get_command_argument(1, nml_path)
 
    call read_namelist(trim(nml_path), p)
-   call load_mesh(trim(p%mesh_file), mesh)
+   call partition_and_load(trim(p%mesh_file), ctx, mesh)
    call assign_patch_bcs(p, mesh, bc_dat)
    call alloc_state(s, mesh)
    call set_initial_condition(p, mesh, s)
+   call halo_init_persistent(mesh, ctx)
 
    t = 0.0_wp
    step = 0
    do while (t < p%t_end .and. step < p%max_steps)
-      dt = compute_dt(mesh, s, p%cfl)
+      dt = compute_dt(mesh, s, p%cfl, ctx)
       if (t + dt > p%t_end) dt = p%t_end - t
-      call rk3_step(mesh, bc_dat, s, dt)
+      call rk3_step(mesh, bc_dat, s, dt, ctx)
       t = t + dt
       step = step + 1
    end do
 
-   ! Compare to exact Sod at t = p%t_end along the diaphragm axis.
+   ! Local L1 sums vs. exact Sod at t = p%t_end along the diaphragm axis.
    x_d = p%diaphragm_pos
-   err_rho = 0.0_wp; err_u = 0.0_wp; err_p = 0.0_wp
-   tot_rho = 0.0_wp; tot_u = 0.0_wp; tot_p = 0.0_wp
+   err_rho_l = 0.0_wp; err_u_l = 0.0_wp; err_p_l = 0.0_wp
+   tot_rho_l = 0.0_wp; tot_u_l = 0.0_wp; tot_p_l = 0.0_wp
 
    do c = 1, mesh%nc_internal
       x = mesh%cell_centroid(p%diaphragm_axis, c)
       call prim_from_cons(s%U(:, c), rho_n, u_n, v_n, w_n, p_n)
       call exact_sod(p%rho_L, p%u_L, p%p_L, p%rho_R, p%u_R, p%p_R, &
                      x - x_d, t, rho_e, u_e, p_e)
-      err_rho = err_rho + abs(rho_n - rho_e) * mesh%cell_volume(c)
-      err_u   = err_u   + abs(u_n   - u_e)   * mesh%cell_volume(c)
-      err_p   = err_p   + abs(p_n   - p_e)   * mesh%cell_volume(c)
-      tot_rho = tot_rho + abs(rho_e)         * mesh%cell_volume(c)
-      tot_u   = tot_u   + abs(u_e)           * mesh%cell_volume(c)
-      tot_p   = tot_p   + abs(p_e)           * mesh%cell_volume(c)
+      err_rho_l = err_rho_l + abs(rho_n - rho_e) * mesh%cell_volume(c)
+      err_u_l   = err_u_l   + abs(u_n   - u_e)   * mesh%cell_volume(c)
+      err_p_l   = err_p_l   + abs(p_n   - p_e)   * mesh%cell_volume(c)
+      tot_rho_l = tot_rho_l + abs(rho_e)         * mesh%cell_volume(c)
+      tot_u_l   = tot_u_l   + abs(u_e)           * mesh%cell_volume(c)
+      tot_p_l   = tot_p_l   + abs(p_e)           * mesh%cell_volume(c)
    end do
+
+   ! Reduce to globals.
+   if (ctx%nproc > 1) then
+      call MPI_Allreduce(err_rho_l, err_rho, 1, MPI_DOUBLE_PRECISION, MPI_SUM, ctx%comm)
+      call MPI_Allreduce(err_u_l,   err_u,   1, MPI_DOUBLE_PRECISION, MPI_SUM, ctx%comm)
+      call MPI_Allreduce(err_p_l,   err_p,   1, MPI_DOUBLE_PRECISION, MPI_SUM, ctx%comm)
+      call MPI_Allreduce(tot_rho_l, tot_rho, 1, MPI_DOUBLE_PRECISION, MPI_SUM, ctx%comm)
+      call MPI_Allreduce(tot_u_l,   tot_u,   1, MPI_DOUBLE_PRECISION, MPI_SUM, ctx%comm)
+      call MPI_Allreduce(tot_p_l,   tot_p,   1, MPI_DOUBLE_PRECISION, MPI_SUM, ctx%comm)
+   else
+      err_rho = err_rho_l; err_u = err_u_l; err_p = err_p_l
+      tot_rho = tot_rho_l; tot_u = tot_u_l; tot_p = tot_p_l
+   end if
 
    rel_rho = err_rho / max(tot_rho, 1.0e-30_wp)
    rel_p   = err_p   / max(tot_p,   1.0e-30_wp)
-   ! u reference can be zero almost everywhere; use absolute L1 against domain
-   rel_u   = err_u / max(tot_u, 1.0e-30_wp)
+   rel_u   = err_u   / max(tot_u,   1.0e-30_wp)
 
-   write(*,'(A,1PE12.4)') 'L1_rel(rho) = ', rel_rho
-   write(*,'(A,1PE12.4)') 'L1_rel(p)   = ', rel_p
-   write(*,'(A,1PE12.4)') 'L1_abs(u)/L1(u_exact) = ', rel_u
+   if (ctx%is_root) then
+      write(*,'(A,I0,A,I0,A,1PE12.4)') &
+         'mpi nproc=', ctx%nproc, '  steps=', step, '  t=', t
+      write(*,'(A,1PE12.4)') 'L1_rel(rho) = ', rel_rho
+      write(*,'(A,1PE12.4)') 'L1_rel(p)   = ', rel_p
+      write(*,'(A,1PE12.4)') 'L1_abs(u)/L1(u_exact) = ', rel_u
+   end if
 
    fails = 0
    if (rel_rho > 0.06_wp) then
-      write(error_unit,'(A,1PE12.4)') 'rel L1 rho exceeds 6% : ', rel_rho
+      if (ctx%is_root) write(error_unit,'(A,1PE12.4)') 'rel L1 rho exceeds 6% : ', rel_rho
       fails = fails + 1
    end if
    if (rel_p > 0.06_wp) then
-      write(error_unit,'(A,1PE12.4)') 'rel L1 p exceeds 6% : ', rel_p
+      if (ctx%is_root) write(error_unit,'(A,1PE12.4)') 'rel L1 p exceeds 6% : ', rel_p
       fails = fails + 1
    end if
+
+   call halo_free_persistent(mesh)
 
    call free_state(s)
    if (allocated(bc_dat)) deallocate(bc_dat)
 
-   if (fails == 0) then
-      write(*,'(A)') 'test_sod_shock_tube: PASS'
-   else
-      write(*,'(A,I0,A)') 'test_sod_shock_tube: FAIL (', fails, ')'
-      stop 1
+   if (ctx%is_root) then
+      if (fails == 0) then
+         write(*,'(A)') 'test_sod_shock_tube: PASS'
+      else
+         write(*,'(A,I0,A)') 'test_sod_shock_tube: FAIL (', fails, ')'
+      end if
    end if
+   call mpi_finalize_ctx()
+   if (fails /= 0) stop 1
 
 contains
 

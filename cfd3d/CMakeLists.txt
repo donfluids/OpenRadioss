@@ -1,6 +1,7 @@
 #
-# cfd3d — 3D compressible CFD solver (unstructured FV, Fortran, MPI later)
-# Milestone 1: serial compressible Euler.
+# cfd3d — 3D compressible CFD solver (unstructured FV, Fortran, MPI).
+# Milestone 2: serial compressible Euler + MPI domain decomposition
+#              (METIS partition, ghost-layer halos, persistent comm/compute overlap).
 #
 cmake_minimum_required(VERSION 3.15)
 
@@ -9,6 +10,19 @@ enable_language(Fortran)
 set(CFD3D_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 
 set(CMAKE_Fortran_STANDARD 2008)
+
+# --- External dependencies (M2) --------------------------------------------
+find_package(MPI REQUIRED COMPONENTS Fortran)
+
+# METIS (from libmetis-dev). No standard FindMETIS in CMake; locate manually.
+find_path(METIS_INCLUDE_DIR metis.h)
+find_library(METIS_LIBRARY metis)
+if(NOT METIS_INCLUDE_DIR OR NOT METIS_LIBRARY)
+   message(FATAL_ERROR "METIS not found (install libmetis-dev). "
+                       "Include: ${METIS_INCLUDE_DIR}  Lib: ${METIS_LIBRARY}")
+endif()
+message(STATUS "METIS include: ${METIS_INCLUDE_DIR}")
+message(STATUS "METIS lib:     ${METIS_LIBRARY}")
 
 if(NOT CMAKE_BUILD_TYPE)
    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
@@ -34,6 +48,8 @@ endif()
 set(CFD3D_CORE_SOURCES
    src/kinds.f90
    src/constants.f90
+   src/mpi_runtime.f90
+   src/metis_binding.f90
    src/mesh_types.f90
    src/mesh_io_gmsh.f90
    src/mesh_topology.f90
@@ -44,6 +60,8 @@ set(CFD3D_CORE_SOURCES
    src/bc_types.f90
    src/bc_apply.f90
    src/riemann_hllc.f90
+   src/partition.f90
+   src/halo_exchange.f90
    src/flux_assembly.f90
    src/time_integration.f90
    src/io_vtk_legacy.f90
@@ -55,11 +73,12 @@ target_compile_options(cfd3d_core PRIVATE
    ${CFD3D_FFLAGS_COMMON}
    $<$<CONFIG:Release>:${CFD3D_FFLAGS_RELEASE}>
    $<$<CONFIG:Debug>:${CFD3D_FFLAGS_DEBUG}>)
+target_link_libraries(cfd3d_core PRIVATE MPI::MPI_Fortran)
 set_target_properties(cfd3d_core PROPERTIES
    Fortran_MODULE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/mod")
 
 add_executable(cfd3d_solver src/main.f90)
-target_link_libraries(cfd3d_solver PRIVATE cfd3d_core)
+target_link_libraries(cfd3d_solver PRIVATE cfd3d_core MPI::MPI_Fortran ${METIS_LIBRARY})
 target_compile_options(cfd3d_solver PRIVATE
    ${CFD3D_FFLAGS_COMMON}
    $<$<CONFIG:Release>:${CFD3D_FFLAGS_RELEASE}>

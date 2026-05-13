@@ -1,9 +1,10 @@
 module mesh_types
    use kinds, only : wp, i4
+   use mpi_f08, only : MPI_Request
    implicit none
    private
 
-   public :: t_patch, t_mesh
+   public :: t_patch, t_mesh, t_halo
    public :: CELL_TET, CELL_HEX, CELL_PRISM, CELL_PYRAMID
    public :: GMSH_TYPE_TRI, GMSH_TYPE_QUAD
    public :: GMSH_TYPE_TET, GMSH_TYPE_HEX, GMSH_TYPE_PRISM, GMSH_TYPE_PYRAMID
@@ -34,14 +35,41 @@ module mesh_types
       integer           :: face_count = 0    ! number of boundary faces
    end type t_patch
 
+   ! Halo descriptor for inter-rank cell-state exchange.
+   ! Maintained per-mesh; built once after partition, reused per RK stage.
+   type :: t_halo
+      integer :: n_neighbors = 0
+      integer, allocatable :: neighbor_ranks(:)        ! (n_neighbors)
+
+      ! CSR layout — send side: for each neighbor, list of LOCAL cell indices to pack.
+      integer, allocatable :: send_offset(:)           ! (n_neighbors+1)
+      integer, allocatable :: send_cells (:)           ! (send_offset(n_neighbors+1)-1)
+
+      ! CSR layout — recv side: for each neighbor, list of GHOST cell indices to unpack into.
+      integer, allocatable :: recv_offset(:)           ! (n_neighbors+1)
+      integer, allocatable :: recv_ghosts(:)           ! (recv_offset(n_neighbors+1)-1)
+
+      ! Packed double-precision MPI buffers (NVAR floats per cell).
+      real(wp), allocatable :: send_buf(:)             ! (NVAR * total_send)
+      real(wp), allocatable :: recv_buf(:)             ! (NVAR * total_recv)
+
+      ! Persistent request handles (one Isend + one Irecv per neighbor).
+      type(MPI_Request), allocatable :: send_req(:)    ! (n_neighbors)
+      type(MPI_Request), allocatable :: recv_req(:)    ! (n_neighbors)
+
+      logical :: persistent_inited = .false.
+   end type t_halo
+
    type :: t_mesh
       ! Vertices
       integer  :: nv = 0
       real(wp), allocatable :: xv(:,:)                 ! (3, nv)
 
-      ! Cells (SoA, CSR vertex list)
-      integer  :: nc_internal = 0                     ! cells owned locally (M1: all)
-      integer  :: nc_total    = 0                     ! nc_internal + nc_ghost (M1: equal)
+      ! Cells (SoA, CSR vertex list). Ordering:
+      !   [1..nc_internal] are locally-owned cells
+      !   [nc_internal+1..nc_total] are halo/ghost cells mirroring neighbor-rank state
+      integer  :: nc_internal = 0
+      integer  :: nc_total    = 0
       integer,  allocatable :: cell_type(:)            ! (nc_total) CELL_*
       integer,  allocatable :: cell_vtx_ptr(:)         ! (nc_total+1) CSR ptr
       integer,  allocatable :: cell_vtx(:)             ! flat CSR data
@@ -49,13 +77,17 @@ module mesh_types
       real(wp), allocatable :: cell_centroid(:,:)      ! (3, nc_total)
       integer,  allocatable :: cell_perm(:)            ! (nc_total) identity in M1; RCM in M2
 
-      ! Faces — interior first, then boundary grouped by patch
+      ! Faces, ordered:
+      !   [1..nf_pure_interior]                       — both cells local
+      !   [nf_pure_interior+1..nf_interior]           — partition faces (1 local + 1 ghost)
+      !   [nf_interior+1..nf]                         — physical boundary faces, grouped by patch
       integer  :: nf = 0
-      integer  :: nf_interior = 0
-      integer  :: nf_boundary = 0
+      integer  :: nf_pure_interior = 0
+      integer  :: nf_interior      = 0                 ! = nf_pure_interior + n_partition_faces
+      integer  :: nf_boundary      = 0
       integer,  allocatable :: face_owner(:)           ! (nf) local cell index
       integer,  allocatable :: face_owner_lf(:)        ! (nf) local face index on owner
-      integer,  allocatable :: face_neighbor(:)        ! (nf) 0 for boundary in M1
+      integer,  allocatable :: face_neighbor(:)        ! (nf) 0 for boundary
       real(wp), allocatable :: face_area(:)            ! (nf)
       real(wp), allocatable :: face_normal(:,:)        ! (3, nf) unit, owner->neighbor
       real(wp), allocatable :: face_centroid(:,:)      ! (3, nf)
@@ -64,6 +96,15 @@ module mesh_types
       ! Patches
       integer  :: np = 0
       type(t_patch), allocatable :: patches(:)         ! (np)
+
+      ! Halo exchange (only meaningful when nproc > 1)
+      type(t_halo) :: halo
+
+      ! Global cell IDs and owning rank — for each cell in [1..nc_total].
+      ! Local cells [1..nc_internal] have owner_rank = my_rank.
+      ! Ghost cells [nc_internal+1..nc_total] have owner_rank = neighbor rank.
+      integer, allocatable :: cell_global_id (:)       ! (nc_total)
+      integer, allocatable :: cell_owner_rank(:)       ! (nc_total)
    end type t_mesh
 
 contains

@@ -137,7 +137,7 @@ contains
       integer,           intent(inout) :: nb
 
       integer :: nelem, i, id, etype, ntags, t, k
-      integer :: phys_tag, n_cells, n_bf, csr_size, ip
+      integer :: phys_tag, n_cells, n_bf, csr_size
       integer :: tags(16)
       integer :: nodes(32)
       integer, allocatable :: cell_type(:), cell_vtx_ptr(:), cell_vtx(:)

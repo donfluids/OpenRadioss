@@ -18,6 +18,8 @@ contains
       type(t_mesh),     intent(in) :: mesh
       type(t_state),    intent(in) :: s
       real(wp),         intent(in) :: time
+      ! Note: writes only the local partition. Each MPI rank emits its own
+      ! file; concatenate / merge externally for global visualization.
 
       integer :: u, ios, i, c, k, vptr, nv
       integer :: total_int, vtk_type

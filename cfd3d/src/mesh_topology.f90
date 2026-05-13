@@ -91,14 +91,14 @@ contains
 
       ! Phase 1: enumerate candidate faces
       ncand = 0
-      do c = 1, mesh%nc_internal
+      do c = 1, mesh%nc_total
          nf_c = n_faces_per_cell(mesh%cell_type(c))
          ncand = ncand + nf_c
       end do
       allocate(cand(ncand))
 
       k = 0
-      do c = 1, mesh%nc_internal
+      do c = 1, mesh%nc_total
          ct = mesh%cell_type(c)
          nf_c = n_faces_per_cell(ct)
          vptr = mesh%cell_vtx_ptr(c) - 1   ! base
@@ -140,9 +140,10 @@ contains
       end do
 
       nf_total = nf_interior + nf_boundary
-      mesh%nf          = nf_total
-      mesh%nf_interior = nf_interior
-      mesh%nf_boundary = nf_boundary
+      mesh%nf               = nf_total
+      mesh%nf_interior      = nf_interior
+      mesh%nf_pure_interior = nf_interior   ! serial / pre-partition: no partition faces yet
+      mesh%nf_boundary      = nf_boundary
 
       allocate(mesh%face_owner   (nf_total))
       allocate(mesh%face_owner_lf(nf_total))
@@ -253,7 +254,6 @@ contains
       integer,           intent(in)    :: nfb, nfi
 
       integer :: ip, p, np, j, idx
-      logical :: any_orphan
 
       np = mesh%np
       ! Reset patches' face_count
@@ -262,7 +262,6 @@ contains
       end do
 
       ! First pass: count per patch
-      any_orphan = .false.
       do j = 1, nfb
          ip = 0
          do p = 1, np
@@ -271,11 +270,7 @@ contains
                exit
             end if
          end do
-         if (ip > 0) then
-            mesh%patches(ip)%face_count = mesh%patches(ip)%face_count + 1
-         else
-            any_orphan = .true.
-         end if
+         if (ip > 0) mesh%patches(ip)%face_count = mesh%patches(ip)%face_count + 1
       end do
 
       ! Assign face_start for each patch
@@ -286,11 +281,17 @@ contains
       end do
 
       ! Second pass: emit
-      ! Use running counters per patch
+      ! Use running counters per patch; orphans get unique slots after all patches.
       block
          integer, allocatable :: pcnt(:)
+         integer :: orphan_start, orphan_cursor
          allocate(pcnt(np))
          pcnt = 0
+         orphan_start = nfi
+         do p = 1, np
+            orphan_start = orphan_start + mesh%patches(p)%face_count
+         end do
+         orphan_cursor = orphan_start
          do j = 1, nfb
             ip = 0
             do p = 1, np
@@ -303,9 +304,8 @@ contains
                pcnt(ip) = pcnt(ip) + 1
                idx = mesh%patches(ip)%face_start + pcnt(ip) - 1
             else
-               ! Orphan boundary face — append at the end
-               idx = nfi + nfb
-               ! Note: not strictly handled here; in practice all bfaces should map
+               orphan_cursor = orphan_cursor + 1
+               idx = orphan_cursor
             end if
             mesh%face_owner   (idx) = bcand(j)%cell
             mesh%face_owner_lf(idx) = bcand(j)%lface
@@ -315,9 +315,9 @@ contains
          deallocate(pcnt)
       end block
 
-      if (any_orphan) then
-         write(*,'(A)') 'mesh_topology: warning — orphan boundary face(s) detected'
-      end if
+      ! Orphans (boundary candidates with no matching gmsh bface) are expected
+      ! during MPI partition (ghost-only faces). They get unique slots but
+      ! patch=0; the partition classifier in partition.f90 drops them.
 
       ! Tag interior faces with patch=0
       do j = 1, nfi

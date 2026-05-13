@@ -8,7 +8,7 @@ set(TEST_FFLAGS_DBG    ${CFD3D_FFLAGS_DEBUG})
 
 function(add_cfd3d_test name)
    add_executable(${name} ${name}.f90)
-   target_link_libraries(${name} PRIVATE cfd3d_core)
+   target_link_libraries(${name} PRIVATE cfd3d_core MPI::MPI_Fortran ${METIS_LIBRARY})
    target_compile_options(${name} PRIVATE
       ${TEST_FFLAGS_COMMON}
       $<$<CONFIG:Release>:${TEST_FFLAGS_REL}>
@@ -55,3 +55,17 @@ add_test(NAME test_sod_shock_tube
          COMMAND $<TARGET_FILE:test_sod_shock_tube> "${CASE_WORKDIR}/sod3d.nml"
          WORKING_DIRECTORY "${CASE_WORKDIR}")
 set_tests_properties(test_sod_shock_tube PROPERTIES DEPENDS generate_sod_mesh)
+
+# M2 parallel acceptance: same Sod case run on 4 ranks. The mesh is partitioned
+# via METIS, halos exchanged each RK stage, and the global L1 error vs. exact
+# Sod must satisfy the same 6 % threshold as serial.
+find_program(MPIEXEC_EXECUTABLE NAMES mpirun mpiexec)
+if(MPIEXEC_EXECUTABLE)
+   add_test(NAME test_sod_shock_tube_mpi4
+            COMMAND ${MPIEXEC_EXECUTABLE} --oversubscribe -np 4
+                    $<TARGET_FILE:test_sod_shock_tube> "${CASE_WORKDIR}/sod3d.nml"
+            WORKING_DIRECTORY "${CASE_WORKDIR}")
+   set_tests_properties(test_sod_shock_tube_mpi4 PROPERTIES
+      DEPENDS generate_sod_mesh
+      ENVIRONMENT "OMPI_ALLOW_RUN_AS_ROOT=1;OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1")
+endif()
