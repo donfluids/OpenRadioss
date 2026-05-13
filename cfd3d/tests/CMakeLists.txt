@@ -26,6 +26,8 @@ add_cfd3d_test(test_sod_shock_tube)
 add_cfd3d_test(test_couette)
 add_cfd3d_test(test_mms_order)
 add_cfd3d_test(test_sedov)
+add_cfd3d_test(test_eos_jwl)
+add_cfd3d_test(test_blast_overpressure)
 
 # Working directory for the integration tests — meshes + namelists are generated here.
 set(CASE_WORKDIR "${CMAKE_CURRENT_BINARY_DIR}/sod3d")
@@ -131,6 +133,27 @@ add_test(NAME test_sedov
          COMMAND $<TARGET_FILE:test_sedov> "${SEDOV_WORKDIR}/sedov.nml"
          WORKING_DIRECTORY "${SEDOV_WORKDIR}")
 set_tests_properties(test_sedov PROPERTIES DEPENDS generate_sedov_mesh)
+
+# M5.2 free-field TNT blast — peak overpressure vs Kingery-Bulmash.
+add_test(NAME test_eos_jwl
+         COMMAND $<TARGET_FILE:test_eos_jwl>)
+
+set(BLAST_WORKDIR "${CMAKE_CURRENT_BINARY_DIR}/blast_freefield")
+file(MAKE_DIRECTORY "${BLAST_WORKDIR}")
+configure_file(
+   "${CFD3D_SOURCE_DIR}/cases/blast_freefield/blast_freefield.nml"
+   "${BLAST_WORKDIR}/blast_freefield.nml" COPYONLY)
+configure_file(
+   "${CFD3D_SOURCE_DIR}/cases/blast_freefield/probes.csv"
+   "${BLAST_WORKDIR}/probes.csv" COPYONLY)
+add_test(NAME generate_blast_freefield_mesh
+         COMMAND $<TARGET_FILE:gen_sod_mesh> 80 80 80 0.6 0.6 0.6 "${BLAST_WORKDIR}/blast_freefield.msh"
+         WORKING_DIRECTORY "${BLAST_WORKDIR}")
+add_test(NAME test_blast_overpressure
+         COMMAND $<TARGET_FILE:test_blast_overpressure> "${BLAST_WORKDIR}/blast_freefield.nml"
+         WORKING_DIRECTORY "${BLAST_WORKDIR}")
+set_tests_properties(test_blast_overpressure PROPERTIES
+   DEPENDS generate_blast_freefield_mesh)
 
 # M2 parallel acceptance: same Sod case run on 4 ranks. The mesh is partitioned
 # via METIS, halos exchanged each RK stage, and the global L1 error vs. exact

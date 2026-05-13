@@ -67,6 +67,7 @@ set(CFD3D_CORE_SOURCES
    src/viscous_fluxes.f90
    src/mms.f90
    src/probes.f90
+   src/eos_jwl.f90
    src/partition.f90
    src/halo_exchange.f90
    src/flux_assembly.f90

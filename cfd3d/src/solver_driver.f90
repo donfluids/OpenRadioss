@@ -177,6 +177,18 @@ contains
          ! blast_radius around blast_center. p_hot = (γ-1)·E / V_region with
          ! V_region globally summed over MPI ranks for consistency.
          call init_sedov_state(p, mesh, s, ctx)
+      case ('tnt_charge')
+         ! TNT free-field charge. Map physical charge mass to deposited
+         ! energy E = m_TNT · 4.184 MJ/kg, then use the Sedov machinery
+         ! with E auto-computed. The deposit uses ambient density at
+         ! blast_radius (the "fluid-energy equivalent" / balloon-analogy
+         ! approach; full JWL evolution lives in a follow-up sub-phase).
+         block
+            type(t_run_params) :: pl
+            pl = p
+            pl%blast_energy = p%tnt_mass * p%tnt_specific_E
+            call init_sedov_state(pl, mesh, s, ctx)
+         end block
       case default
          write(*,'(A,A)') 'set_initial_condition: unknown init_type ', trim(p%init_type)
          error stop 1

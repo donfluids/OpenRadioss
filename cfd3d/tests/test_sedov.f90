@@ -34,7 +34,7 @@ program test_sedov
    type(t_mpi_ctx)    :: ctx
    real(wp) :: t, dt
    real(wp) :: rho, ux, uy, uz, pres
-   real(wp) :: dx, dy, dz, r
+   real(wp) :: dx, dy, dz
    real(wp) :: r_at_peak_local, r_at_peak_global, R_analytic, err
    integer  :: c, step, fails
    ! MPI MAXLOC pair (pressure, rank-encoded r metadata) — we cheat by sending

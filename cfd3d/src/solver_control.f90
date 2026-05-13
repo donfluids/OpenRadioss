@@ -20,7 +20,7 @@ module solver_control
       real(wp) :: output_interval = 0.1_wp
 
       ! Initial condition
-      character(len=32) :: init_type = 'uniform'  ! 'uniform' | 'riemann' | 'mms' | 'sedov' | 'blast_bubble'
+      character(len=32) :: init_type = 'uniform'  ! 'uniform' | 'riemann' | 'mms' | 'sedov' | 'blast_bubble' | 'tnt_charge'
       integer  :: diaphragm_axis = 1
       real(wp) :: diaphragm_pos  = 0.0_wp
       real(wp) :: rho_L = 1.0_wp, u_L = 0.0_wp, v_L = 0.0_wp, w_L = 0.0_wp, p_L = 1.0_wp
@@ -34,6 +34,12 @@ module solver_control
       real(wp) :: blast_rho       = 1.0_wp      ! blast_bubble: hot-region density
       real(wp) :: ambient_p       = 1.0_wp      ! ambient pressure outside hotspot
       real(wp) :: ambient_rho     = 1.0_wp      ! ambient density outside hotspot
+
+      ! TNT-charge IC (M5.2). Specific TNT yield 4.184 MJ/kg by default
+      ! (standard heat of detonation). tnt_mass > 0 selects energy
+      ! mapping from the physical charge mass.
+      real(wp) :: tnt_mass        = 0.0_wp      ! kg of TNT
+      real(wp) :: tnt_specific_E  = 4.184e6_wp  ! J/kg
 
       ! Probe output (M5.1). Empty path disables probe output.
       character(len=256) :: probes_file = ''
@@ -89,6 +95,7 @@ contains
       real(wp) :: rho_R, u_R, v_R, w_R, p_R
       real(wp) :: blast_center(3), blast_radius, blast_energy, blast_p, blast_rho
       real(wp) :: ambient_p, ambient_rho
+      real(wp) :: tnt_mass, tnt_specific_E
       character(len=256) :: probes_file
       logical  :: muscl_enabled, viscous_enabled, mms_enabled, sutherland
       real(wp) :: venkat_K
@@ -111,7 +118,7 @@ contains
          R_gas, sutherland, mu_const, mu_ref, T_ref, S_S, Pr, &
          sgs_model, C_s, C_w, Pr_t, &
          blast_center, blast_radius, blast_energy, blast_p, blast_rho, &
-         ambient_p, ambient_rho, probes_file, &
+         ambient_p, ambient_rho, tnt_mass, tnt_specific_E, probes_file, &
          patch_count, patch_name, patch_bc, &
          patch_rho, patch_u, patch_v, patch_w, patch_p
 
@@ -137,6 +144,8 @@ contains
       blast_rho    = p%blast_rho
       ambient_p    = p%ambient_p
       ambient_rho  = p%ambient_rho
+      tnt_mass        = p%tnt_mass
+      tnt_specific_E  = p%tnt_specific_E
       probes_file  = p%probes_file
       muscl_enabled   = p%muscl_enabled
       venkat_K        = p%venkat_K
@@ -193,6 +202,8 @@ contains
       p%blast_rho    = blast_rho
       p%ambient_p    = ambient_p
       p%ambient_rho  = ambient_rho
+      p%tnt_mass        = tnt_mass
+      p%tnt_specific_E  = tnt_specific_E
       p%probes_file  = probes_file
       p%muscl_enabled   = muscl_enabled
       p%venkat_K        = venkat_K
