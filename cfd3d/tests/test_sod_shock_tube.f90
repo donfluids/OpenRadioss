@@ -59,7 +59,7 @@ program test_sod_shock_tube
    t = 0.0_wp
    step = 0
    do while (t < p%t_end .and. step < p%max_steps)
-      dt = compute_dt(mesh, s, p%cfl, ctx)
+      dt = compute_dt(mesh, s, p%cfl, ctx, p%viscous_enabled)
       if (t + dt > p%t_end) dt = p%t_end - t
       call rk3_step(mesh, bc_dat, s, dt, ctx, p%muscl_enabled, p%viscous_enabled, p%venkat_K)
       t = t + dt

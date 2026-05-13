@@ -152,8 +152,26 @@ contains
             W_R(IP_RHO) = rho_b; W_R(IP_U) = u_b; W_R(IP_V) = v_b
             W_R(IP_W)   = w_b;   W_R(IP_P) = p_b
             Wf = 0.5_wp * (W_L + W_R)
-            ! Single-sided gradient at boundary (owner gradient).
-            gWf(:, :) = s%gradW(:, :, c_o)
+            ! Over-relaxed gradient correction at the boundary face: replace
+            ! the along-dr component of the cell gradient with the local
+            ! one-sided difference (W_face - W_cell)/|dr|. This is critical
+            ! at no-slip walls where the cell-averaged LSQ gradient would
+            ! over-state the wall stress in transient.
+            block
+               real(wp) :: ndr(3), dr_mag, local_deriv, dot_gn
+               integer  :: v
+               ndr = drO   ! face_centroid - owner_centroid
+               dr_mag = sqrt(ndr(1)**2 + ndr(2)**2 + ndr(3)**2)
+               if (dr_mag > 0.0_wp) ndr = ndr / dr_mag
+               do v = 1, NPRIM
+                  gWf(:, v) = s%gradW(:, v, c_o)
+                  if (dr_mag > 0.0_wp) then
+                     local_deriv = (Wf(v) - s%W(v, c_o)) / dr_mag
+                     dot_gn = gWf(1, v)*ndr(1) + gWf(2, v)*ndr(2) + gWf(3, v)*ndr(3)
+                     gWf(:, v) = gWf(:, v) + (local_deriv - dot_gn) * ndr
+                  end if
+               end do
+            end block
             call viscous_flux_face(Wf, gWf, nrml, Fvis)
             Fflx = Fflx - Fvis
          end if

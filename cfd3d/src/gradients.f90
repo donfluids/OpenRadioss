@@ -58,7 +58,10 @@ contains
             if (c_n <= mesh%nc_internal) &
                call accumulate(A_cells(:,:,c_n), b_cells(:,:,c_n), -dr, w2, -dW)
          else
-            ! Physical boundary face: use BC ghost state at face centroid (half-step).
+            ! Physical boundary face. The BC ghost state lies one cell-thickness
+            ! across the wall (face midpoint = (cell + ghost)/2 in our convention),
+            ! so the LSQ contribution uses the face-midpoint primitive — i.e.
+            ! 0.5*(W_cell + W_ghost) at dr = face_centroid - cell_centroid.
             ip = mesh%face_patch(f)
             block
                real(wp) :: UR(NVAR), QL(NVAR), rho_b, u_b, v_b, w_b, p_b
@@ -74,7 +77,7 @@ contains
             end block
             dr = mesh%face_centroid(:, f) - mesh%cell_centroid(:, c_o)
             w2 = 1.0_wp / max(dr(1)*dr(1) + dr(2)*dr(2) + dr(3)*dr(3), 1.0e-30_wp)
-            dW = Wbc - s%W(:, c_o)
+            dW = 0.5_wp * (Wbc - s%W(:, c_o))
             if (c_o <= mesh%nc_internal) &
                call accumulate(A_cells(:,:,c_o), b_cells(:,:,c_o), dr, w2, dW)
          end if

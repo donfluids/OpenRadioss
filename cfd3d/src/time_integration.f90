@@ -5,7 +5,8 @@ module time_integration
    use mesh_types,    only : t_mesh
    use fields,        only : t_state
    use bc_types,      only : t_bc_data
-   use eos_ideal_gas, only : max_wave_speed
+   use eos_ideal_gas, only : max_wave_speed, prim_from_cons, temperature, mu_sutherland
+   use gas_properties, only : gas
    use flux_assembly, only : residual_begin, residual_pure_interior, &
                              residual_partition, residual_boundary
    use gradients,     only : compute_primitives, compute_gradients
@@ -20,34 +21,60 @@ module time_integration
 
 contains
 
-   function compute_dt(mesh, s, cfl, ctx) result(dt)
+   ! Combined acoustic + (optionally) viscous CFL.
+   !   dt_acoustic(c) = CFL * V_c / Σ_faces 0.5(|u·n|+c)_avg A
+   !   dt_visc(c)     = CFL * V_c² / Σ_faces κ A²
+   !     with κ = max(4μ/(3ρ),  γ μ/(ρ Pr)) — the larger of viscous and thermal
+   !     diffusivities.
+   function compute_dt(mesh, s, cfl, ctx, viscous) result(dt)
       type(t_mesh),    intent(in) :: mesh
       type(t_state),   intent(in) :: s
       real(wp),        intent(in) :: cfl
       type(t_mpi_ctx), intent(in) :: ctx
+      logical,         intent(in) :: viscous
       real(wp) :: dt
 
-      integer :: f, c
+      integer :: f, c, c_n
       real(wp) :: lam_face, area, lam_o, lam_n, cell_dt, dt_local, dt_global
-      real(wp), allocatable :: lam_sum(:)
+      real(wp), allocatable :: lam_sum(:), visc_sum(:)
       real(wp) :: nrml(3)
+      real(wp) :: rho, u, v, w, p, T, mu, kappa, kappa_o, kappa_n
+      real(wp) :: dt_visc_cell
 
-      allocate(lam_sum(mesh%nc_total), source=0.0_wp)
+      allocate(lam_sum(mesh%nc_total),  source=0.0_wp)
+      allocate(visc_sum(mesh%nc_total), source=0.0_wp)
 
       do f = 1, mesh%nf
          nrml = mesh%face_normal(:, f)
          area = mesh%face_area(f)
-         c = mesh%face_owner(f)
+         c    = mesh%face_owner(f)
+         c_n  = mesh%face_neighbor(f)
          lam_o = max_wave_speed(s%U(:, c), nrml)
-         if (mesh%face_neighbor(f) > 0) then
-            lam_n = max_wave_speed(s%U(:, mesh%face_neighbor(f)), nrml)
+         if (c_n > 0) then
+            lam_n    = max_wave_speed(s%U(:, c_n), nrml)
             lam_face = 0.5_wp * (lam_o + lam_n) * area
          else
             lam_face = lam_o * area
          end if
          lam_sum(c) = lam_sum(c) + lam_face
-         if (mesh%face_neighbor(f) > 0) then
-            lam_sum(mesh%face_neighbor(f)) = lam_sum(mesh%face_neighbor(f)) + lam_face
+         if (c_n > 0) lam_sum(c_n) = lam_sum(c_n) + lam_face
+
+         if (viscous) then
+            call prim_from_cons(s%U(:, c), rho, u, v, w, p)
+            T = temperature(rho, p)
+            mu = mu_sutherland(T)
+            kappa_o = max(4.0_wp*mu/(3.0_wp*rho), 1.4_wp*mu/(rho*gas%Pr))
+            if (c_n > 0) then
+               call prim_from_cons(s%U(:, c_n), rho, u, v, w, p)
+               T = temperature(rho, p)
+               mu = mu_sutherland(T)
+               kappa_n = max(4.0_wp*mu/(3.0_wp*rho), 1.4_wp*mu/(rho*gas%Pr))
+               kappa = 0.5_wp * (kappa_o + kappa_n)
+            else
+               kappa = kappa_o
+            end if
+            visc_sum(c) = visc_sum(c) + kappa * area * area
+            if (c_n > 0) visc_sum(c_n) = visc_sum(c_n) + kappa * area * area
          end if
       end do
 
@@ -57,8 +84,12 @@ contains
             cell_dt = cfl * mesh%cell_volume(c) / lam_sum(c)
             if (cell_dt < dt_local) dt_local = cell_dt
          end if
+         if (viscous .and. visc_sum(c) > 0.0_wp) then
+            dt_visc_cell = cfl * mesh%cell_volume(c)**2 / visc_sum(c)
+            if (dt_visc_cell < dt_local) dt_local = dt_visc_cell
+         end if
       end do
-      deallocate(lam_sum)
+      deallocate(lam_sum, visc_sum)
 
       if (ctx%nproc > 1) then
          call MPI_Allreduce(dt_local, dt_global, 1, MPI_DOUBLE_PRECISION, &

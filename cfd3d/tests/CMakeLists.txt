@@ -23,6 +23,7 @@ add_cfd3d_test(test_eos)
 add_cfd3d_test(test_riemann_hllc)
 add_cfd3d_test(test_mesh_topology)
 add_cfd3d_test(test_sod_shock_tube)
+add_cfd3d_test(test_couette)
 
 # Working directory for the integration tests — meshes + namelists are generated here.
 set(CASE_WORKDIR "${CMAKE_CURRENT_BINARY_DIR}/sod3d")
@@ -55,6 +56,20 @@ add_test(NAME test_sod_shock_tube
          COMMAND $<TARGET_FILE:test_sod_shock_tube> "${CASE_WORKDIR}/sod3d.nml"
          WORKING_DIRECTORY "${CASE_WORKDIR}")
 set_tests_properties(test_sod_shock_tube PROPERTIES DEPENDS generate_sod_mesh)
+
+# Couette flow (viscous) acceptance test.
+set(COUETTE_WORKDIR "${CMAKE_CURRENT_BINARY_DIR}/couette")
+file(MAKE_DIRECTORY "${COUETTE_WORKDIR}")
+configure_file(
+   "${CFD3D_SOURCE_DIR}/cases/couette/couette.nml"
+   "${COUETTE_WORKDIR}/couette.nml" COPYONLY)
+add_test(NAME generate_couette_mesh
+         COMMAND $<TARGET_FILE:gen_sod_mesh> 4 32 4 1.0 1.0 1.0 "${COUETTE_WORKDIR}/couette.msh"
+         WORKING_DIRECTORY "${COUETTE_WORKDIR}")
+add_test(NAME test_couette
+         COMMAND $<TARGET_FILE:test_couette> "${COUETTE_WORKDIR}/couette.nml"
+         WORKING_DIRECTORY "${COUETTE_WORKDIR}")
+set_tests_properties(test_couette PROPERTIES DEPENDS generate_couette_mesh)
 
 # M2 parallel acceptance: same Sod case run on 4 ranks. The mesh is partitioned
 # via METIS, halos exchanged each RK stage, and the global L1 error vs. exact

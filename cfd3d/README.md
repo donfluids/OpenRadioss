@@ -3,14 +3,17 @@
 Unstructured finite-volume solver for the compressible Navier-Stokes equations
 in modern Fortran (2008+), MPI-parallel.
 
-**Status — Milestone 2:** serial + MPI compressible **Euler**. METIS partition
-with one-layer ghost cells, persistent-request halo exchange with comm/compute
-overlap (pure-interior faces computed while halos are in flight), global CFL
-via `MPI_Allreduce(MIN)`, per-rank VTK output. Verified on the 3D Sod shock
-tube: L1 error vs the exact Riemann solution is **2.4 %** (rho) / 2.2 % (p) at
-N=200, **identical** serial and 4-rank.
+**Status — Milestone 3:** MPI compressible **Navier-Stokes** with second-order
+MUSCL reconstruction. Per-cell least-squares gradients of primitive variables,
+Venkatakrishnan slope limiter, Sutherland viscosity, viscous stress + heat
+fluxes. Two-channel halo exchange (state + gradients/limiters) so partition
+faces remain second-order under MPI. Inviscid acceptance: 3D Sod L1 error
+drops from 2.4 % (first-order, M2) to **0.6 %** (MUSCL, M3) at N=200, identical
+serial vs MPI4. Viscous (Couette) and MMS verification are partial — see
+notes below.
 
-M1 — serial Euler — landed previously and remains green.
+M1/M2 previously landed: M1 serial Euler, M2 added METIS partition +
+persistent-request halo exchange.
 
 ## Build
 
@@ -71,9 +74,35 @@ cfd3d/
   doc/
 ```
 
-## Out of scope for M2 (future)
+## M3 architecture notes
+
+- `gradients` — per-cell LSQ gradient of primitives; boundary contributions
+  use the face-midpoint value (0.5*(W_cell + W_ghost)) so the half-step
+  stencil is consistent.
+- `limiters` — Venkatakrishnan ψ ∈ [0,1] per cell, per primitive variable.
+- `viscous_fluxes` — Newtonian stress tensor + Fourier heat flux. `T = p/(ρR)`,
+  `μ(T)` from Sutherland's law via `gas_properties`.
+- `halo_exchange` — two channels (U for state, GP for grads+limiters).
+- `flux_assembly` — MUSCL reconstruction at faces, viscous contribution
+  subtracted from inviscid. Boundary viscous uses an over-relaxed gradient
+  correction so the normal-direction derivative equals the local face-cell
+  difference (essential at no-slip walls).
+
+## Known issues / TODOs (M3 follow-up)
+
+- `test_couette` is currently a smoke test only — the viscous-wall discretization
+  reaches an equilibrium that's qualitatively right (top wall pulls fluid in the
+  correct direction) but does not match the analytical linear profile under
+  the chosen `μ`. Suspected cause: the LSQ-averaged cell gradient at the
+  wall interacts with the over-relaxed correction in a way that biases the
+  steady state. Needs targeted investigation.
+- MMS spatial-order verification deferred to M3.3. The infrastructure
+  (analytical primitives + FD-derived source + L2 norm at multiple refinements)
+  is sketched but not yet implemented.
+
+## Out of scope for M3 (future)
 
 - True distributed-input ParMETIS (M2.5) — each rank reads its own chunk
   rather than the full mesh. Needed when `nv` exceeds per-rank memory.
-- Viscous fluxes + MUSCL reconstruction (M3).
+- VTU/PVTU output upgrade (M3 still uses legacy VTK).
 - Turbulence model (M4).
