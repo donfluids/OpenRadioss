@@ -164,18 +164,7 @@ contains
          end if
          call cons_from_prim(W_L(IP_RHO), W_L(IP_U), W_L(IP_V), W_L(IP_W), W_L(IP_P), Q_L)
          call ghost_state(mesh%patches(ip)%bc_type, bc_dat(ip), Q_L, nrml, Q_R)
-         select case (mesh%patches(ip)%bc_type)
-         case (BC_SLIP_WALL, BC_SYMMETRY)
-            ! Pure pressure flux: F = (0, p*n_x, p*n_y, p*n_z, 0). Avoids the
-            ! spurious HLLC compression wave from the velocity-reflection ghost.
-            Fflx(1) = 0.0_wp
-            Fflx(2) = W_L(IP_P) * nrml(1)
-            Fflx(3) = W_L(IP_P) * nrml(2)
-            Fflx(4) = W_L(IP_P) * nrml(3)
-            Fflx(5) = 0.0_wp
-         case default
-            Fflx = hllc_flux(Q_L, Q_R, nrml)
-         end select
+         Fflx = hllc_flux(Q_L, Q_R, nrml)
 
          if (viscous .and. bc_has_viscous_flux(mesh%patches(ip)%bc_type)) then
             call prim_from_cons(Q_R, rho_b, u_b, v_b, w_b, p_b)

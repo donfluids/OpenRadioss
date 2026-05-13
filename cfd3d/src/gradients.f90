@@ -74,27 +74,34 @@ contains
             if (c_n <= mesh%nc_internal) &
                call accumulate(A_cells(:,:,c_n), b_cells(:,:,c_n), -dr, w2, -dW)
          else
-            ! Physical boundary face. Only include in the LSQ stencil for BC
-            ! types that carry meaningful information (Dirichlet, no-slip,
-            ! supersonic inlet). Slip walls / symmetry / outflow are excluded
-            ! to avoid the reflection-induced spurious normal gradient.
+            ! Physical boundary face. Contribute geometry (A matrix) for all
+            ! BC types to keep A non-singular when a coordinate direction is
+            ! resolved only by walls (e.g. Sod tube Ny=Nz=1). For dW: use the
+            ! face-midpoint value 0.5*(W_cell + W_ghost) for Dirichlet, no-slip,
+            ! and supersonic inlet (real BC information). For slip/symmetry/
+            ! outflow/farfield use dW=0 (zero-gradient) — the velocity-reflection
+            ! ghost in slip walls would otherwise inject a spurious normal
+            ! gradient at edge cells.
             ip = mesh%face_patch(f)
-            if (.not. bc_contributes_to_gradient(mesh%patches(ip)%bc_type)) cycle
-            block
-               real(wp) :: UR(NVAR), QL(NVAR), rho_b, u_b, v_b, w_b, p_b
-               QL = s%U(:, c_o)
-               call ghost_state(mesh%patches(ip)%bc_type, bc_dat(ip), &
-                                QL, mesh%face_normal(:, f), UR)
-               call prim_from_cons(UR, rho_b, u_b, v_b, w_b, p_b)
-               Wbc(IP_RHO) = rho_b
-               Wbc(IP_U)   = u_b
-               Wbc(IP_V)   = v_b
-               Wbc(IP_W)   = w_b
-               Wbc(IP_P)   = p_b
-            end block
             dr = mesh%face_centroid(:, f) - mesh%cell_centroid(:, c_o)
             w2 = 1.0_wp / max(dr(1)*dr(1) + dr(2)*dr(2) + dr(3)*dr(3), 1.0e-30_wp)
-            dW = 0.5_wp * (Wbc - s%W(:, c_o))
+            if (bc_contributes_to_gradient(mesh%patches(ip)%bc_type)) then
+               block
+                  real(wp) :: UR(NVAR), QL(NVAR), rho_b, u_b, v_b, w_b, p_b
+                  QL = s%U(:, c_o)
+                  call ghost_state(mesh%patches(ip)%bc_type, bc_dat(ip), &
+                                   QL, mesh%face_normal(:, f), UR)
+                  call prim_from_cons(UR, rho_b, u_b, v_b, w_b, p_b)
+                  Wbc(IP_RHO) = rho_b
+                  Wbc(IP_U)   = u_b
+                  Wbc(IP_V)   = v_b
+                  Wbc(IP_W)   = w_b
+                  Wbc(IP_P)   = p_b
+               end block
+               dW = 0.5_wp * (Wbc - s%W(:, c_o))
+            else
+               dW = 0.0_wp
+            end if
             if (c_o <= mesh%nc_internal) &
                call accumulate(A_cells(:,:,c_o), b_cells(:,:,c_o), dr, w2, dW)
          end if
