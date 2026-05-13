@@ -63,6 +63,7 @@ set(CFD3D_CORE_SOURCES
    src/gradients.f90
    src/limiters.f90
    src/riemann_hllc.f90
+   src/sgs_model.f90
    src/viscous_fluxes.f90
    src/mms.f90
    src/partition.f90

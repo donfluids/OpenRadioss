@@ -18,6 +18,7 @@ module viscous_fluxes
                               IRHOU, IRHOV, IRHOW, IRHOE
    use gas_properties, only : gas
    use eos_ideal_gas,  only : temperature, mu_sutherland
+   use sgs_model,      only : sgs_nu_t
    implicit none
    private
 
@@ -26,15 +27,19 @@ module viscous_fluxes
 contains
 
    ! Viscous flux through a face given the two cell-side primitive states and
-   ! their primitive gradients (face-averaged). dT_face is the face-centered
-   ! temperature gradient (derived from p and rho gradients via the ideal gas).
-   pure subroutine viscous_flux_face(W_face, gW_face, n, F)
+   ! their primitive gradients (face-averaged). The optional Delta_face
+   ! activates an algebraic SGS eddy viscosity ν_t at the face — the total
+   ! diffusivity becomes μ_eff = μ + ρ ν_t (momentum) and k_eff = μ cp/Pr +
+   ! ρ ν_t cp/Pr_t (heat). When gas%sgs_kind == SGS_NONE this collapses to
+   ! the molecular-only path.
+   pure subroutine viscous_flux_face(W_face, gW_face, n, Delta_face, F)
       real(wp), intent(in)  :: W_face(NPRIM)
       real(wp), intent(in)  :: gW_face(3, NPRIM)         ! (3, NPRIM)
       real(wp), intent(in)  :: n(3)
+      real(wp), intent(in)  :: Delta_face
       real(wp), intent(out) :: F(NVAR)
 
-      real(wp) :: rho, u, v, w, p, T, mu, k_th
+      real(wp) :: rho, u, v, w, p, T, mu, k_th, nu_t, mu_eff
       real(wp) :: dudx, dudy, dudz, dvdx, dvdy, dvdz, dwdx, dwdy, dwdz
       real(wp) :: drho_dx, drho_dy, drho_dz, dp_dx, dp_dy, dp_dz
       real(wp) :: dT_dx, dT_dy, dT_dz
@@ -50,7 +55,9 @@ contains
       p   = W_face(IP_P)
       T   = temperature(rho, p)
       mu  = mu_sutherland(T)
-      k_th = mu * gas%cp / gas%Pr
+      nu_t   = sgs_nu_t(gW_face, Delta_face)
+      mu_eff = mu + rho * nu_t
+      k_th   = mu * gas%cp / gas%Pr + rho * nu_t * gas%cp / gas%Pr_t
 
       dudx = gW_face(1, IP_U); dudy = gW_face(2, IP_U); dudz = gW_face(3, IP_U)
       dvdx = gW_face(1, IP_V); dvdy = gW_face(2, IP_V); dvdz = gW_face(3, IP_V)
@@ -66,12 +73,12 @@ contains
 
       div_u = dudx + dvdy + dwdz
 
-      txx = mu * (2.0_wp * dudx - (2.0_wp/3.0_wp) * div_u)
-      tyy = mu * (2.0_wp * dvdy - (2.0_wp/3.0_wp) * div_u)
-      tzz = mu * (2.0_wp * dwdz - (2.0_wp/3.0_wp) * div_u)
-      txy = mu * (dudy + dvdx)
-      txz = mu * (dudz + dwdx)
-      tyz = mu * (dvdz + dwdy)
+      txx = mu_eff * (2.0_wp * dudx - (2.0_wp/3.0_wp) * div_u)
+      tyy = mu_eff * (2.0_wp * dvdy - (2.0_wp/3.0_wp) * div_u)
+      tzz = mu_eff * (2.0_wp * dwdz - (2.0_wp/3.0_wp) * div_u)
+      txy = mu_eff * (dudy + dvdx)
+      txz = mu_eff * (dudz + dwdx)
+      tyz = mu_eff * (dvdz + dwdy)
 
       qx = -k_th * dT_dx
       qy = -k_th * dT_dy

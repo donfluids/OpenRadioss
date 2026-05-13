@@ -8,7 +8,7 @@ module solver_driver
    use eos_ideal_gas,    only : cons_from_prim
    use time_integration, only : compute_dt, rk3_step
    use io_vtk_legacy,    only : write_vtk
-   use solver_control,   only : t_run_params, bc_string_to_int
+   use solver_control,   only : t_run_params, bc_string_to_int, sgs_string_to_int
    use mpi_runtime,      only : t_mpi_ctx
    use halo_exchange,    only : halo_init_persistent, halo_free_persistent, &
                                 halo_init_persistent_gp, halo_free_persistent_gp
@@ -32,7 +32,9 @@ contains
       integer  :: step, out_idx
       character(len=512) :: outfile
 
-      call init_gas(p%R_gas, p%sutherland, p%mu_const, p%mu_ref, p%T_ref, p%S_S, p%Pr)
+      call init_gas(p%R_gas, p%sutherland, p%mu_const, p%mu_ref, p%T_ref, p%S_S, p%Pr, &
+                    sgs_kind=sgs_string_to_int(p%sgs_model), &
+                    C_s=p%C_s, C_w=p%C_w, Pr_t=p%Pr_t)
 
       call partition_and_load(trim(p%mesh_file), ctx, mesh)
       call assign_patch_bcs(p, mesh, bc_dat)

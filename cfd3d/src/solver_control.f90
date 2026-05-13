@@ -6,7 +6,7 @@ module solver_control
    implicit none
    private
 
-   public :: t_run_params, read_namelist, bc_string_to_int
+   public :: t_run_params, read_namelist, bc_string_to_int, sgs_string_to_int
 
    integer, parameter, public :: MAX_PATCHES = 32
 
@@ -41,6 +41,12 @@ module solver_control
       real(wp) :: S_S         = 110.4_wp
       real(wp) :: Pr          = 0.72_wp
 
+      ! SGS algebraic LES (M4): 'none' | 'smagorinsky' | 'wale'.
+      character(len=32) :: sgs_model = 'none'
+      real(wp) :: C_s         = 0.17_wp
+      real(wp) :: C_w         = 0.5_wp
+      real(wp) :: Pr_t        = 0.9_wp
+
       ! Patch BC mapping
       integer :: patch_count = 0
       character(len=64) :: patch_name(MAX_PATCHES) = ''
@@ -72,6 +78,8 @@ contains
       logical  :: muscl_enabled, viscous_enabled, mms_enabled, sutherland
       real(wp) :: venkat_K
       real(wp) :: R_gas, mu_const, mu_ref, T_ref, S_S, Pr
+      character(len=32) :: sgs_model
+      real(wp) :: C_s, C_w, Pr_t
       integer  :: patch_count
       character(len=64) :: patch_name(MAX_PATCHES)
       character(len=32) :: patch_bc  (MAX_PATCHES)
@@ -86,6 +94,7 @@ contains
          rho_L, u_L, v_L, w_L, p_L, rho_R, u_R, v_R, w_R, p_R, &
          muscl_enabled, venkat_K, viscous_enabled, mms_enabled, &
          R_gas, sutherland, mu_const, mu_ref, T_ref, S_S, Pr, &
+         sgs_model, C_s, C_w, Pr_t, &
          patch_count, patch_name, patch_bc, &
          patch_rho, patch_u, patch_v, patch_w, patch_p
 
@@ -115,6 +124,10 @@ contains
       T_ref      = p%T_ref
       S_S        = p%S_S
       Pr         = p%Pr
+      sgs_model  = p%sgs_model
+      C_s        = p%C_s
+      C_w        = p%C_w
+      Pr_t       = p%Pr_t
       patch_count = p%patch_count
       patch_name  = p%patch_name
       patch_bc    = p%patch_bc
@@ -159,6 +172,10 @@ contains
       p%T_ref      = T_ref
       p%S_S        = S_S
       p%Pr         = Pr
+      p%sgs_model  = sgs_model
+      p%C_s        = C_s
+      p%C_w        = C_w
+      p%Pr_t       = Pr_t
       p%patch_count = patch_count
       p%patch_name  = patch_name
       p%patch_bc    = patch_bc
@@ -191,5 +208,19 @@ contains
          it = BC_SLIP_WALL
       end select
    end function bc_string_to_int
+
+   pure function sgs_string_to_int(s) result(it)
+      use gas_properties, only : SGS_NONE, SGS_SMAG, SGS_WALE
+      character(len=*), intent(in) :: s
+      integer :: it
+      select case (trim(adjustl(s)))
+      case ('smagorinsky', 'smag')
+         it = SGS_SMAG
+      case ('wale')
+         it = SGS_WALE
+      case default
+         it = SGS_NONE
+      end select
+   end function sgs_string_to_int
 
 end module solver_control

@@ -19,7 +19,7 @@ program test_couette
    use bc_types,         only : t_bc_data
    use eos_ideal_gas,    only : prim_from_cons
    use time_integration, only : compute_dt, rk3_step
-   use solver_control,   only : t_run_params, read_namelist
+   use solver_control,   only : t_run_params, read_namelist, sgs_string_to_int
    use solver_driver,    only : assign_patch_bcs, set_initial_condition
    use mpi_runtime,      only : t_mpi_ctx, mpi_init_ctx, mpi_finalize_ctx
    use gas_properties,   only : init_gas
@@ -49,7 +49,9 @@ program test_couette
    call get_command_argument(1, nml_path)
 
    call read_namelist(trim(nml_path), p)
-   call init_gas(p%R_gas, p%sutherland, p%mu_const, p%mu_ref, p%T_ref, p%S_S, p%Pr)
+   call init_gas(p%R_gas, p%sutherland, p%mu_const, p%mu_ref, p%T_ref, p%S_S, p%Pr, &
+                 sgs_kind=sgs_string_to_int(p%sgs_model), &
+                 C_s=p%C_s, C_w=p%C_w, Pr_t=p%Pr_t)
    call partition_and_load(trim(p%mesh_file), ctx, mesh)
    call assign_patch_bcs(p, mesh, bc_dat)
    call alloc_state(s, mesh)

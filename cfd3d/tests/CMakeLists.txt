@@ -93,6 +93,27 @@ add_test(NAME test_mms_order
 set_tests_properties(test_mms_order PROPERTIES
    DEPENDS "generate_mms_coarse;generate_mms_fine")
 
+# M4 MMS-LES — same MMS framework with WALE SGS turned on.
+set(MMS_LES_WORKDIR "${CMAKE_CURRENT_BINARY_DIR}/mms_les")
+file(MAKE_DIRECTORY "${MMS_LES_WORKDIR}")
+configure_file(
+   "${CFD3D_SOURCE_DIR}/cases/mms_les/mms_les.nml.coarse"
+   "${MMS_LES_WORKDIR}/mms_les.nml.coarse" COPYONLY)
+configure_file(
+   "${CFD3D_SOURCE_DIR}/cases/mms_les/mms_les.nml.fine"
+   "${MMS_LES_WORKDIR}/mms_les.nml.fine" COPYONLY)
+add_test(NAME generate_mms_les_coarse
+         COMMAND $<TARGET_FILE:gen_sod_mesh> 8 8 8 1.0 1.0 1.0 "${MMS_LES_WORKDIR}/mms_les_coarse.msh"
+         WORKING_DIRECTORY "${MMS_LES_WORKDIR}")
+add_test(NAME generate_mms_les_fine
+         COMMAND $<TARGET_FILE:gen_sod_mesh> 16 16 16 1.0 1.0 1.0 "${MMS_LES_WORKDIR}/mms_les_fine.msh"
+         WORKING_DIRECTORY "${MMS_LES_WORKDIR}")
+add_test(NAME test_mms_order_les
+         COMMAND $<TARGET_FILE:test_mms_order> "${MMS_LES_WORKDIR}/mms_les.nml"
+         WORKING_DIRECTORY "${MMS_LES_WORKDIR}")
+set_tests_properties(test_mms_order_les PROPERTIES
+   DEPENDS "generate_mms_les_coarse;generate_mms_les_fine")
+
 # M2 parallel acceptance: same Sod case run on 4 ranks. The mesh is partitioned
 # via METIS, halos exchanged each RK stage, and the global L1 error vs. exact
 # Sod must satisfy the same 6 % threshold as serial.

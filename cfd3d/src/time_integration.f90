@@ -6,7 +6,9 @@ module time_integration
    use fields,        only : t_state
    use bc_types,      only : t_bc_data
    use eos_ideal_gas, only : max_wave_speed, prim_from_cons, temperature, mu_sutherland
-   use gas_properties, only : gas
+   use gas_properties, only : gas, SGS_NONE
+   use sgs_model,      only : sgs_nu_t, sgs_filter_width
+   use constants,      only : NPRIM
    use flux_assembly, only : residual_begin, residual_pure_interior, &
                              residual_partition, residual_boundary
    use gradients,     only : compute_primitives, compute_gradients
@@ -63,11 +65,20 @@ contains
             call prim_from_cons(s%U(:, c), rho, u, v, w, p)
             T = temperature(rho, p)
             mu = mu_sutherland(T)
+            ! Include SGS eddy viscosity using the gradient from the previous
+            ! step (s%gradW, valid after the first complete RK step; zero on
+            ! the first step which is the most conservative direction anyway).
+            if (gas%sgs_kind /= SGS_NONE) then
+               mu = mu + rho * sgs_nu_t(s%gradW(:, :, c), sgs_filter_width(mesh%cell_volume(c)))
+            end if
             kappa_o = max(4.0_wp*mu/(3.0_wp*rho), 1.4_wp*mu/(rho*gas%Pr))
             if (c_n > 0) then
                call prim_from_cons(s%U(:, c_n), rho, u, v, w, p)
                T = temperature(rho, p)
                mu = mu_sutherland(T)
+               if (gas%sgs_kind /= SGS_NONE) then
+                  mu = mu + rho * sgs_nu_t(s%gradW(:, :, c_n), sgs_filter_width(mesh%cell_volume(c_n)))
+               end if
                kappa_n = max(4.0_wp*mu/(3.0_wp*rho), 1.4_wp*mu/(rho*gas%Pr))
                kappa = 0.5_wp * (kappa_o + kappa_n)
             else

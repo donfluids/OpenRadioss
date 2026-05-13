@@ -10,6 +10,7 @@ module flux_assembly
    use eos_ideal_gas,  only : cons_from_prim, prim_from_cons
    use riemann_hllc,   only : hllc_flux
    use viscous_fluxes, only : viscous_flux_face
+   use sgs_model,      only : sgs_filter_width
    use fields,         only : t_state
    use mpi_runtime,    only : t_mpi_ctx
    use halo_exchange,  only : halo_pack_and_start, halo_wait
@@ -125,7 +126,12 @@ contains
                gWf(j, v) = 0.5_wp * (s%gradW(j, v, c_o) + s%gradW(j, v, c_n))
             end do
          end do
-         call viscous_flux_face(Wf, gWf, nrml, Fvis)
+         block
+            real(wp) :: Delta_face
+            Delta_face = 0.5_wp * ( sgs_filter_width(mesh%cell_volume(c_o)) &
+                                  + sgs_filter_width(mesh%cell_volume(c_n)) )
+            call viscous_flux_face(Wf, gWf, nrml, Delta_face, Fvis)
+         end block
          Fflx = Fflx - Fvis
       end if
 
@@ -191,7 +197,7 @@ contains
                   end if
                end do
             end block
-            call viscous_flux_face(Wf, gWf, nrml, Fvis)
+            call viscous_flux_face(Wf, gWf, nrml, sgs_filter_width(mesh%cell_volume(c_o)), Fvis)
             Fflx = Fflx - Fvis
          end if
 

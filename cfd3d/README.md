@@ -3,16 +3,22 @@
 Unstructured finite-volume solver for the compressible Navier-Stokes equations
 in modern Fortran (2008+), MPI-parallel.
 
-**Status — Milestone 3:** MPI compressible **Navier-Stokes** with second-order
-MUSCL reconstruction. Per-cell least-squares gradients of primitive variables,
-Venkatakrishnan slope limiter, Sutherland viscosity, viscous stress + heat
-fluxes. Two-channel halo exchange (state + gradients/limiters) so partition
-faces remain second-order under MPI. Inviscid acceptance: 3D Sod L1 error
-drops from 2.4 % (first-order, M2) to **0.6 %** (MUSCL, M3) at N=200, identical
-serial vs MPI4. **MMS spatial-order test gives p ≈ 1.88** (target 2.0 for MUSCL).
+**Status — Milestone 4:** MPI compressible **Navier-Stokes** with second-order
+MUSCL reconstruction and an **algebraic SGS LES** model (Smagorinsky / WALE).
+The SGS eddy viscosity drops into `viscous_flux_face` via `μ_eff = μ + ρ ν_t`
+and `k_eff = μ cp/Pr + ρ ν_t cp/Pr_t`, with the filter width `Δ = V_cell^(1/3)`
+computed per face. WALE self-damps near walls; Smagorinsky is also available
+via namelist toggle. The M3 MMS framework was extended to include an
+analytical SGS source (4th-order central FD of the analytical SGS stress).
 
-M1/M2 previously landed: M1 serial Euler, M2 added METIS partition +
-persistent-request halo exchange.
+Acceptance status:
+- 3D Sod (MUSCL, inviscid): L1_rel(ρ) = **0.6 %**, identical serial vs MPI4.
+- M3 MMS (SGS off): observed order **p ≈ 1.88**.
+- M4 MMS-LES (WALE on): observed order **p ≈ 1.88** — confirms the SGS
+  infrastructure preserves spatial order.
+
+M1/M2/M3 previously landed: M1 serial Euler, M2 METIS partition +
+persistent-request halo exchange, M3 MUSCL+Venkat+Sutherland+MMS.
 
 ## Build
 

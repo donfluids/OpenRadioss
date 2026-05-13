@@ -23,7 +23,7 @@ program test_mms_order
    use fields,           only : t_state, alloc_state, free_state
    use bc_types,         only : t_bc_data
    use eos_ideal_gas,    only : cons_from_prim
-   use solver_control,   only : t_run_params, read_namelist
+   use solver_control,   only : t_run_params, read_namelist, sgs_string_to_int
    use solver_driver,    only : assign_patch_bcs
    use mpi_runtime,      only : t_mpi_ctx, mpi_init_ctx, mpi_finalize_ctx
    use gas_properties,   only : init_gas
@@ -32,6 +32,7 @@ program test_mms_order
    use flux_assembly,    only : residual_begin, residual_pure_interior, &
                                 residual_partition, residual_boundary
    use mms,              only : mms_primitives, mms_source
+   use sgs_model,        only : sgs_filter_width
    implicit none
 
    integer :: nargs
@@ -101,7 +102,9 @@ contains
 
       this_nml = trim(base_nml) // '.' // trim(label)
       call read_namelist(trim(this_nml), p)
-      call init_gas(p%R_gas, p%sutherland, p%mu_const, p%mu_ref, p%T_ref, p%S_S, p%Pr)
+      call init_gas(p%R_gas, p%sutherland, p%mu_const, p%mu_ref, p%T_ref, p%S_S, p%Pr, &
+                    sgs_kind=sgs_string_to_int(p%sgs_model), &
+                    C_s=p%C_s, C_w=p%C_w, Pr_t=p%Pr_t)
       call partition_and_load(trim(p%mesh_file), ctx, mesh)
       call assign_patch_bcs(p, mesh, bc_dat)
       call alloc_state(s, mesh)
@@ -136,7 +139,8 @@ contains
       do c = 1, mesh%nc_internal
          call mms_source(mesh%cell_centroid(1, c), &
                           mesh%cell_centroid(2, c), &
-                          mesh%cell_centroid(3, c), Svec)
+                          mesh%cell_centroid(3, c), &
+                          sgs_filter_width(mesh%cell_volume(c)), Svec)
          err_local = err_local + sum((s%R(:, c) - mesh%cell_volume(c) * Svec)**2)
          vol_local = vol_local + mesh%cell_volume(c)
       end do
