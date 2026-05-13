@@ -24,6 +24,7 @@ add_cfd3d_test(test_riemann_hllc)
 add_cfd3d_test(test_mesh_topology)
 add_cfd3d_test(test_sod_shock_tube)
 add_cfd3d_test(test_couette)
+add_cfd3d_test(test_mms_order)
 
 # Working directory for the integration tests — meshes + namelists are generated here.
 set(CASE_WORKDIR "${CMAKE_CURRENT_BINARY_DIR}/sod3d")
@@ -70,6 +71,27 @@ add_test(NAME test_couette
          COMMAND $<TARGET_FILE:test_couette> "${COUETTE_WORKDIR}/couette.nml"
          WORKING_DIRECTORY "${COUETTE_WORKDIR}")
 set_tests_properties(test_couette PROPERTIES DEPENDS generate_couette_mesh)
+
+# MMS spatial-order test: refine box [0,1]^3 from N=8 to N=16; check order≈2.
+set(MMS_WORKDIR "${CMAKE_CURRENT_BINARY_DIR}/mms")
+file(MAKE_DIRECTORY "${MMS_WORKDIR}")
+configure_file(
+   "${CFD3D_SOURCE_DIR}/cases/mms/mms.nml.coarse"
+   "${MMS_WORKDIR}/mms.nml.coarse" COPYONLY)
+configure_file(
+   "${CFD3D_SOURCE_DIR}/cases/mms/mms.nml.fine"
+   "${MMS_WORKDIR}/mms.nml.fine" COPYONLY)
+add_test(NAME generate_mms_coarse
+         COMMAND $<TARGET_FILE:gen_sod_mesh> 8 8 8 1.0 1.0 1.0 "${MMS_WORKDIR}/mms_coarse.msh"
+         WORKING_DIRECTORY "${MMS_WORKDIR}")
+add_test(NAME generate_mms_fine
+         COMMAND $<TARGET_FILE:gen_sod_mesh> 16 16 16 1.0 1.0 1.0 "${MMS_WORKDIR}/mms_fine.msh"
+         WORKING_DIRECTORY "${MMS_WORKDIR}")
+add_test(NAME test_mms_order
+         COMMAND $<TARGET_FILE:test_mms_order> "${MMS_WORKDIR}/mms.nml"
+         WORKING_DIRECTORY "${MMS_WORKDIR}")
+set_tests_properties(test_mms_order PROPERTIES
+   DEPENDS "generate_mms_coarse;generate_mms_fine")
 
 # M2 parallel acceptance: same Sod case run on 4 ranks. The mesh is partitioned
 # via METIS, halos exchanged each RK stage, and the global L1 error vs. exact
