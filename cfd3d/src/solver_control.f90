@@ -1,7 +1,8 @@
 module solver_control
    use kinds,     only : wp
    use constants, only : BC_SLIP_WALL, BC_SYMMETRY, &
-                         BC_SUPERSONIC_INLET, BC_SUPERSONIC_OUTLET, BC_FARFIELD
+                         BC_SUPERSONIC_INLET, BC_SUPERSONIC_OUTLET, BC_FARFIELD, &
+                         BC_NO_SLIP_WALL, BC_DIRICHLET
    implicit none
    private
 
@@ -19,11 +20,26 @@ module solver_control
       real(wp) :: output_interval = 0.1_wp
 
       ! Initial condition
-      character(len=32) :: init_type = 'uniform'  ! 'uniform' | 'riemann'
+      character(len=32) :: init_type = 'uniform'  ! 'uniform' | 'riemann' | 'mms'
       integer  :: diaphragm_axis = 1
       real(wp) :: diaphragm_pos  = 0.0_wp
       real(wp) :: rho_L = 1.0_wp, u_L = 0.0_wp, v_L = 0.0_wp, w_L = 0.0_wp, p_L = 1.0_wp
       real(wp) :: rho_R = 1.0_wp, u_R = 0.0_wp, v_R = 0.0_wp, w_R = 0.0_wp, p_R = 1.0_wp
+
+      ! Scheme toggles (M3)
+      logical  :: muscl_enabled    = .true.    ! 2nd-order MUSCL with Venkat limiter
+      real(wp) :: venkat_K         = 5.0_wp    ! Venkat tuning constant
+      logical  :: viscous_enabled  = .false.   ! compressible NS vs Euler
+      logical  :: mms_enabled      = .false.   ! manufactured solution source + ref
+
+      ! Gas thermophysical properties (M3)
+      real(wp) :: R_gas       = 1.0_wp         ! specific gas constant (non-dim default)
+      logical  :: sutherland  = .false.        ! false = constant μ
+      real(wp) :: mu_const    = 0.0_wp
+      real(wp) :: mu_ref      = 1.716e-5_wp    ! Sutherland μ at T_ref
+      real(wp) :: T_ref       = 273.15_wp
+      real(wp) :: S_S         = 110.4_wp
+      real(wp) :: Pr          = 0.72_wp
 
       ! Patch BC mapping
       integer :: patch_count = 0
@@ -53,6 +69,9 @@ contains
       real(wp) :: diaphragm_pos
       real(wp) :: rho_L, u_L, v_L, w_L, p_L
       real(wp) :: rho_R, u_R, v_R, w_R, p_R
+      logical  :: muscl_enabled, viscous_enabled, mms_enabled, sutherland
+      real(wp) :: venkat_K
+      real(wp) :: R_gas, mu_const, mu_ref, T_ref, S_S, Pr
       integer  :: patch_count
       character(len=64) :: patch_name(MAX_PATCHES)
       character(len=32) :: patch_bc  (MAX_PATCHES)
@@ -65,6 +84,8 @@ contains
       namelist /cfd3d/ mesh_file, case_name, output_dir, t_end, cfl, &
          output_interval, max_steps, init_type, diaphragm_axis, diaphragm_pos, &
          rho_L, u_L, v_L, w_L, p_L, rho_R, u_R, v_R, w_R, p_R, &
+         muscl_enabled, venkat_K, viscous_enabled, mms_enabled, &
+         R_gas, sutherland, mu_const, mu_ref, T_ref, S_S, Pr, &
          patch_count, patch_name, patch_bc, &
          patch_rho, patch_u, patch_v, patch_w, patch_p
 
@@ -83,6 +104,17 @@ contains
       diaphragm_pos   = p%diaphragm_pos
       rho_L = p%rho_L; u_L = p%u_L; v_L = p%v_L; w_L = p%w_L; p_L = p%p_L
       rho_R = p%rho_R; u_R = p%u_R; v_R = p%v_R; w_R = p%w_R; p_R = p%p_R
+      muscl_enabled   = p%muscl_enabled
+      venkat_K        = p%venkat_K
+      viscous_enabled = p%viscous_enabled
+      mms_enabled     = p%mms_enabled
+      R_gas      = p%R_gas
+      sutherland = p%sutherland
+      mu_const   = p%mu_const
+      mu_ref     = p%mu_ref
+      T_ref      = p%T_ref
+      S_S        = p%S_S
+      Pr         = p%Pr
       patch_count = p%patch_count
       patch_name  = p%patch_name
       patch_bc    = p%patch_bc
@@ -116,6 +148,17 @@ contains
       p%diaphragm_pos   = diaphragm_pos
       p%rho_L = rho_L; p%u_L = u_L; p%v_L = v_L; p%w_L = w_L; p%p_L = p_L
       p%rho_R = rho_R; p%u_R = u_R; p%v_R = v_R; p%w_R = w_R; p%p_R = p_R
+      p%muscl_enabled   = muscl_enabled
+      p%venkat_K        = venkat_K
+      p%viscous_enabled = viscous_enabled
+      p%mms_enabled     = mms_enabled
+      p%R_gas      = R_gas
+      p%sutherland = sutherland
+      p%mu_const   = mu_const
+      p%mu_ref     = mu_ref
+      p%T_ref      = T_ref
+      p%S_S        = S_S
+      p%Pr         = Pr
       p%patch_count = patch_count
       p%patch_name  = patch_name
       p%patch_bc    = patch_bc
@@ -140,6 +183,10 @@ contains
          it = BC_SUPERSONIC_OUTLET
       case ('farfield')
          it = BC_FARFIELD
+      case ('no_slip_wall', 'no_slip')
+         it = BC_NO_SLIP_WALL
+      case ('dirichlet')
+         it = BC_DIRICHLET
       case default
          it = BC_SLIP_WALL
       end select

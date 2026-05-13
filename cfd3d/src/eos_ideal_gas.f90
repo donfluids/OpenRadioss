@@ -1,12 +1,13 @@
 module eos_ideal_gas
-   use kinds,     only : wp
-   use constants, only : GAMMA, GM1, NVAR, IRHO, IRHOU, IRHOV, IRHOW, IRHOE, &
-                         TINY_RHO, TINY_P
+   use kinds,          only : wp
+   use constants,      only : GAMMA, GM1, NVAR, IRHO, IRHOU, IRHOV, IRHOW, IRHOE, &
+                              TINY_RHO, TINY_P
+   use gas_properties, only : gas
    implicit none
    private
 
    public :: prim_from_cons, cons_from_prim, sound_speed, pressure_from_cons, &
-             max_wave_speed
+             max_wave_speed, temperature, mu_sutherland
 
 contains
 
@@ -46,6 +47,27 @@ contains
       real(wp) :: p, rho, u, v, w
       call prim_from_cons(Q, rho, u, v, w, p)
    end function pressure_from_cons
+
+   ! Temperature from primitives via ideal gas: T = p / (ρ R_gas).
+   pure function temperature(rho, p) result(T)
+      real(wp), intent(in) :: rho, p
+      real(wp) :: T
+      T = max(p, TINY_P) / (max(rho, TINY_RHO) * gas%R_gas)
+   end function temperature
+
+   ! Sutherland's law μ(T) = μ_ref (T/T_ref)^1.5 (T_ref + S) / (T + S).
+   ! Falls back to gas%mu_const when gas%sutherland is .false.
+   pure function mu_sutherland(T) result(mu)
+      real(wp), intent(in) :: T
+      real(wp) :: mu, Tp
+      if (gas%sutherland) then
+         Tp = max(T, 1.0e-12_wp)
+         mu = gas%mu_ref * (Tp / gas%T_ref) ** 1.5_wp &
+              * (gas%T_ref + gas%S_S) / (Tp + gas%S_S)
+      else
+         mu = gas%mu_const
+      end if
+   end function mu_sutherland
 
    ! Maximum local wave speed |u·n| + c for state Q projected on normal n.
    pure function max_wave_speed(Q, n) result(s)

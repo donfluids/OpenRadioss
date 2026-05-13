@@ -6,7 +6,12 @@ module time_integration
    use fields,        only : t_state
    use bc_types,      only : t_bc_data
    use eos_ideal_gas, only : max_wave_speed
-   use flux_assembly, only : compute_residual
+   use flux_assembly, only : residual_begin, residual_pure_interior, &
+                             residual_partition, residual_boundary
+   use gradients,     only : compute_primitives, compute_gradients
+   use limiters,      only : compute_venkat_limiter
+   use halo_exchange, only : halo_pack_and_start, halo_wait, &
+                             halo_pack_and_start_gp, halo_wait_gp
    use mpi_runtime,   only : t_mpi_ctx
    implicit none
    private
@@ -15,8 +20,6 @@ module time_integration
 
 contains
 
-   ! Global stable time step (CFL). Local min over each rank's cells, then
-   ! MPI_Allreduce(MIN) to get the global minimum.
    function compute_dt(mesh, s, cfl, ctx) result(dt)
       type(t_mesh),    intent(in) :: mesh
       type(t_state),   intent(in) :: s
@@ -66,13 +69,17 @@ contains
       end if
    end function compute_dt
 
-   ! SSP-RK3 (Shu-Osher) full step. Each stage exchanges halos before residual.
-   subroutine rk3_step(mesh, bc_dat, s, dt, ctx)
+   ! SSP-RK3 (Shu-Osher) full step.
+   ! Per stage: halo U → primitives → (grads, limiters) → halo GP overlapped
+   ! with pure-interior residual → partition + boundary residuals → RK update.
+   subroutine rk3_step(mesh, bc_dat, s, dt, ctx, muscl, viscous, K_venkat)
       type(t_mesh),    intent(inout) :: mesh
       type(t_bc_data), intent(in)    :: bc_dat(:)
       type(t_state),   intent(inout) :: s
       real(wp),        intent(in)    :: dt
       type(t_mpi_ctx), intent(in)    :: ctx
+      logical,         intent(in)    :: muscl, viscous
+      real(wp),        intent(in)    :: K_venkat
 
       integer :: c
       real(wp) :: inv_V
@@ -80,25 +87,66 @@ contains
       ! Stash U^n
       s%U0 = s%U
 
-      call compute_residual(mesh, bc_dat, s, ctx)
+      call one_stage(mesh, bc_dat, s, ctx, muscl, viscous, K_venkat)
       do c = 1, mesh%nc_internal
          inv_V = 1.0_wp / mesh%cell_volume(c)
          s%U(:, c) = s%U0(:, c) - dt * inv_V * s%R(:, c)
       end do
 
-      call compute_residual(mesh, bc_dat, s, ctx)
+      call one_stage(mesh, bc_dat, s, ctx, muscl, viscous, K_venkat)
       do c = 1, mesh%nc_internal
          inv_V = 1.0_wp / mesh%cell_volume(c)
          s%U(:, c) = 0.75_wp * s%U0(:, c) &
                    + 0.25_wp * ( s%U(:, c) - dt * inv_V * s%R(:, c) )
       end do
 
-      call compute_residual(mesh, bc_dat, s, ctx)
+      call one_stage(mesh, bc_dat, s, ctx, muscl, viscous, K_venkat)
       do c = 1, mesh%nc_internal
          inv_V = 1.0_wp / mesh%cell_volume(c)
          s%U(:, c) = (1.0_wp/3.0_wp) * s%U0(:, c) &
                    + (2.0_wp/3.0_wp) * ( s%U(:, c) - dt * inv_V * s%R(:, c) )
       end do
    end subroutine rk3_step
+
+   subroutine one_stage(mesh, bc_dat, s, ctx, muscl, viscous, K_venkat)
+      type(t_mesh),    intent(inout) :: mesh
+      type(t_bc_data), intent(in)    :: bc_dat(:)
+      type(t_state),   intent(inout) :: s
+      type(t_mpi_ctx), intent(in)    :: ctx
+      logical,         intent(in)    :: muscl, viscous
+      real(wp),        intent(in)    :: K_venkat
+      logical :: need_grads
+
+      need_grads = muscl .or. viscous
+
+      ! 1) Exchange U so ghosts have current state.
+      call halo_pack_and_start(mesh, s%U, ctx)
+      call halo_wait(mesh, s%U)
+
+      ! 2) Primitives from cons (all cells incl ghosts).
+      call compute_primitives(mesh, s)
+
+      ! 3) Per-cell gradients and (if MUSCL) limiters on local cells.
+      if (need_grads) then
+         call compute_gradients(mesh, bc_dat, s)
+         if (muscl) then
+            call compute_venkat_limiter(mesh, s, K_venkat)
+         else
+            s%psi = 1.0_wp
+         end if
+         ! 4) Exchange grads + limiters; overlap with pure-interior residual.
+         call halo_pack_and_start_gp(mesh, s, ctx)
+         call residual_begin(s)
+         call residual_pure_interior(mesh, s, muscl, viscous)
+         call halo_wait_gp(mesh, s)
+         call residual_partition(mesh, s, muscl, viscous)
+         call residual_boundary(mesh, bc_dat, s, muscl, viscous)
+      else
+         call residual_begin(s)
+         call residual_pure_interior(mesh, s, .false., .false.)
+         call residual_partition(mesh, s, .false., .false.)
+         call residual_boundary(mesh, bc_dat, s, .false., .false.)
+      end if
+   end subroutine one_stage
 
 end module time_integration

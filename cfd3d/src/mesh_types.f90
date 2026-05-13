@@ -49,15 +49,19 @@ module mesh_types
       integer, allocatable :: recv_offset(:)           ! (n_neighbors+1)
       integer, allocatable :: recv_ghosts(:)           ! (recv_offset(n_neighbors+1)-1)
 
-      ! Packed double-precision MPI buffers (NVAR floats per cell).
+      ! Channel U: NVAR floats per cell (conservative state).
       real(wp), allocatable :: send_buf(:)             ! (NVAR * total_send)
       real(wp), allocatable :: recv_buf(:)             ! (NVAR * total_recv)
-
-      ! Persistent request handles (one Isend + one Irecv per neighbor).
-      type(MPI_Request), allocatable :: send_req(:)    ! (n_neighbors)
-      type(MPI_Request), allocatable :: recv_req(:)    ! (n_neighbors)
-
+      type(MPI_Request), allocatable :: send_req(:)
+      type(MPI_Request), allocatable :: recv_req(:)
       logical :: persistent_inited = .false.
+
+      ! Channel GP: gradients + limiters (3*NPRIM + NPRIM = 20 floats per cell).
+      real(wp), allocatable :: send_buf_gp(:)
+      real(wp), allocatable :: recv_buf_gp(:)
+      type(MPI_Request), allocatable :: send_req_gp(:)
+      type(MPI_Request), allocatable :: recv_req_gp(:)
+      logical :: persistent_inited_gp = .false.
    end type t_halo
 
    type :: t_mesh

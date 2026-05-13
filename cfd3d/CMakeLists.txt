@@ -55,11 +55,15 @@ set(CFD3D_CORE_SOURCES
    src/mesh_topology.f90
    src/mesh_metrics.f90
    src/mesh_module.f90
+   src/gas_properties.f90
    src/eos_ideal_gas.f90
    src/fields.f90
    src/bc_types.f90
    src/bc_apply.f90
+   src/gradients.f90
+   src/limiters.f90
    src/riemann_hllc.f90
+   src/viscous_fluxes.f90
    src/partition.f90
    src/halo_exchange.f90
    src/flux_assembly.f90

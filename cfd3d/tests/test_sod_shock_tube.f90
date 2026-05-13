@@ -7,7 +7,8 @@ program test_sod_shock_tube
    use constants,        only : GAMMA, NVAR
    use mesh_types,       only : t_mesh
    use partition,        only : partition_and_load
-   use halo_exchange,    only : halo_init_persistent, halo_free_persistent
+   use halo_exchange,    only : halo_init_persistent, halo_free_persistent, &
+                                halo_init_persistent_gp, halo_free_persistent_gp
    use fields,           only : t_state, alloc_state, free_state
    use bc_types,         only : t_bc_data
    use eos_ideal_gas,    only : prim_from_cons
@@ -15,6 +16,7 @@ program test_sod_shock_tube
    use solver_control,   only : t_run_params, read_namelist
    use solver_driver,    only : assign_patch_bcs, set_initial_condition
    use mpi_runtime,      only : t_mpi_ctx, mpi_init_ctx, mpi_finalize_ctx
+   use gas_properties,   only : init_gas
    implicit none
 
    character(len=512) :: nml_path
@@ -46,18 +48,20 @@ program test_sod_shock_tube
    call get_command_argument(1, nml_path)
 
    call read_namelist(trim(nml_path), p)
+   call init_gas(p%R_gas, p%sutherland, p%mu_const, p%mu_ref, p%T_ref, p%S_S, p%Pr)
    call partition_and_load(trim(p%mesh_file), ctx, mesh)
    call assign_patch_bcs(p, mesh, bc_dat)
    call alloc_state(s, mesh)
    call set_initial_condition(p, mesh, s)
    call halo_init_persistent(mesh, ctx)
+   call halo_init_persistent_gp(mesh, ctx)
 
    t = 0.0_wp
    step = 0
    do while (t < p%t_end .and. step < p%max_steps)
       dt = compute_dt(mesh, s, p%cfl, ctx)
       if (t + dt > p%t_end) dt = p%t_end - t
-      call rk3_step(mesh, bc_dat, s, dt, ctx)
+      call rk3_step(mesh, bc_dat, s, dt, ctx, p%muscl_enabled, p%viscous_enabled, p%venkat_K)
       t = t + dt
       step = step + 1
    end do
@@ -115,6 +119,7 @@ program test_sod_shock_tube
       fails = fails + 1
    end if
 
+   call halo_free_persistent_gp(mesh)
    call halo_free_persistent(mesh)
 
    call free_state(s)

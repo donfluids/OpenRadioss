@@ -2,7 +2,8 @@ module bc_apply
    use kinds,         only : wp
    use constants,     only : NVAR, IRHO, IRHOU, IRHOV, IRHOW, IRHOE, &
                              BC_SLIP_WALL, BC_SYMMETRY, &
-                             BC_SUPERSONIC_INLET, BC_SUPERSONIC_OUTLET, BC_FARFIELD
+                             BC_SUPERSONIC_INLET, BC_SUPERSONIC_OUTLET, BC_FARFIELD, &
+                             BC_NO_SLIP_WALL, BC_DIRICHLET
    use eos_ideal_gas, only : prim_from_cons, cons_from_prim, sound_speed
    use bc_types,      only : t_bc_data
    implicit none
@@ -40,6 +41,26 @@ contains
 
       case (BC_SUPERSONIC_OUTLET)
          UR = UL   ! zero-gradient extrapolation
+
+      case (BC_NO_SLIP_WALL)
+         ! u_wall = v_wall = w_wall = 0; ρ, p zero-gradient; T adiabatic (zero-grad).
+         call prim_from_cons(UL, rho, u, v, w, p)
+         ur_rho = rho
+         ur_u   = -u
+         ur_v   = -v
+         ur_w   = -w
+         ur_p   = p
+         call cons_from_prim(ur_rho, ur_u, ur_v, ur_w, ur_p, UR)
+
+      case (BC_DIRICHLET)
+         ! Reflective Dirichlet: ghost = 2*BC - cell so face midpoint = BC value.
+         call prim_from_cons(UL, rho, u, v, w, p)
+         ur_rho = 2.0_wp*bc_dat%rho - rho
+         ur_u   = 2.0_wp*bc_dat%u   - u
+         ur_v   = 2.0_wp*bc_dat%v   - v
+         ur_w   = 2.0_wp*bc_dat%w   - w
+         ur_p   = 2.0_wp*bc_dat%p   - p
+         call cons_from_prim(ur_rho, ur_u, ur_v, ur_w, ur_p, UR)
 
       case (BC_FARFIELD)
          ! Classify via normal Mach number; supersonic-in -> Dirichlet,

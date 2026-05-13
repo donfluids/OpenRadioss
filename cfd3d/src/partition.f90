@@ -13,7 +13,7 @@
 module partition
    use, intrinsic :: iso_c_binding
    use kinds,         only : wp
-   use constants,     only : NVAR
+   use constants,     only : NVAR, NPRIM
    use mpi_f08
    use mpi_runtime,   only : t_mpi_ctx, mpi_abort_msg
    use mesh_types,    only : t_mesh, t_patch, t_halo
@@ -603,13 +603,17 @@ contains
          deallocate(glob_to_local)
       end block
 
-      ! 7) Allocate packed buffers (NVAR floats per cell).
+      ! 7) Allocate packed buffers. Channel U: NVAR per cell. Channel GP:
+      !    gradients (3*NPRIM) + limiters (NPRIM) = 4*NPRIM per cell.
       block
+         integer, parameter :: GP_SIZE = 4 * NPRIM
          integer :: ntotal_send, ntotal_recv
          ntotal_send = mesh%halo%send_offset(np+1) - 1
          ntotal_recv = mesh%halo%recv_offset(np+1) - 1
-         allocate(mesh%halo%send_buf(NVAR * ntotal_send))
-         allocate(mesh%halo%recv_buf(NVAR * ntotal_recv))
+         allocate(mesh%halo%send_buf   (NVAR    * ntotal_send))
+         allocate(mesh%halo%recv_buf   (NVAR    * ntotal_recv))
+         allocate(mesh%halo%send_buf_gp(GP_SIZE * ntotal_send))
+         allocate(mesh%halo%recv_buf_gp(GP_SIZE * ntotal_recv))
       end block
 
       ! Persistent request init happens in halo_exchange:halo_init_persistent

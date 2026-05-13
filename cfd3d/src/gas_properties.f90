@@ -1,0 +1,47 @@
+! Gas thermophysical properties — set once at startup from the namelist
+! and used by EOS and viscous-flux modules. Module-level state keeps the
+! per-face hot path branch-free.
+module gas_properties
+   use kinds,     only : wp
+   use constants, only : GAMMA, GM1
+   implicit none
+   private
+
+   public :: gas, init_gas
+
+   type :: t_gas
+      real(wp) :: R_gas = 1.0_wp          ! specific gas constant (non-dim default)
+      real(wp) :: cv    = 1.0_wp / GM1
+      real(wp) :: cp    = GAMMA / GM1
+
+      ! Viscosity: Sutherland's law μ(T) = μ_ref (T/T_ref)^1.5 (T_ref + S) / (T + S).
+      ! If sutherland=.false., μ ≡ mu_const.
+      logical  :: sutherland = .true.
+      real(wp) :: mu_const   = 0.0_wp     ! when sutherland=.false.
+      real(wp) :: mu_ref     = 1.716e-5_wp
+      real(wp) :: T_ref      = 273.15_wp
+      real(wp) :: S_S        = 110.4_wp
+
+      real(wp) :: Pr         = 0.72_wp    ! Prandtl number (constant)
+   end type t_gas
+
+   ! Module-level singleton. Mutable, but written only by init_gas at startup.
+   type(t_gas) :: gas
+
+contains
+
+   subroutine init_gas(R_gas, sutherland, mu_const, mu_ref, T_ref, S_S, Pr)
+      real(wp), intent(in) :: R_gas, mu_const, mu_ref, T_ref, S_S, Pr
+      logical,  intent(in) :: sutherland
+      gas%R_gas      = R_gas
+      gas%cv         = R_gas / GM1
+      gas%cp         = R_gas * GAMMA / GM1
+      gas%sutherland = sutherland
+      gas%mu_const   = mu_const
+      gas%mu_ref     = mu_ref
+      gas%T_ref      = T_ref
+      gas%S_S        = S_S
+      gas%Pr         = Pr
+   end subroutine init_gas
+
+end module gas_properties

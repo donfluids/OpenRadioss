@@ -10,7 +10,9 @@ module solver_driver
    use io_vtk_legacy,    only : write_vtk
    use solver_control,   only : t_run_params, bc_string_to_int
    use mpi_runtime,      only : t_mpi_ctx
-   use halo_exchange,    only : halo_init_persistent, halo_free_persistent
+   use halo_exchange,    only : halo_init_persistent, halo_free_persistent, &
+                                halo_init_persistent_gp, halo_free_persistent_gp
+   use gas_properties,   only : init_gas
    implicit none
    private
 
@@ -30,11 +32,14 @@ contains
       integer  :: step, out_idx
       character(len=512) :: outfile
 
+      call init_gas(p%R_gas, p%sutherland, p%mu_const, p%mu_ref, p%T_ref, p%S_S, p%Pr)
+
       call partition_and_load(trim(p%mesh_file), ctx, mesh)
       call assign_patch_bcs(p, mesh, bc_dat)
       call alloc_state(s, mesh)
       call set_initial_condition(p, mesh, s)
       call halo_init_persistent(mesh, ctx)
+      call halo_init_persistent_gp(mesh, ctx)
 
       write(*,'(A,I0,A,I0,A,I0,A,I0,A,I0,A,I0,A,I0,A,I0)') &
          'rank=', ctx%rank, &
@@ -55,7 +60,7 @@ contains
       do while (t < p%t_end .and. step < p%max_steps)
          dt = compute_dt(mesh, s, p%cfl, ctx)
          if (t + dt > p%t_end) dt = p%t_end - t
-         call rk3_step(mesh, bc_dat, s, dt, ctx)
+         call rk3_step(mesh, bc_dat, s, dt, ctx, p%muscl_enabled, p%viscous_enabled, p%venkat_K)
          t = t + dt
          step = step + 1
          if (ctx%is_root .and. mod(step, 50) == 0) then
@@ -71,6 +76,7 @@ contains
       ! Final dump
       call write_one(p, mesh, s, t, ctx, out_idx, outfile)
 
+      call halo_free_persistent_gp(mesh)
       call halo_free_persistent(mesh)
       call free_state(s)
       if (allocated(bc_dat)) deallocate(bc_dat)

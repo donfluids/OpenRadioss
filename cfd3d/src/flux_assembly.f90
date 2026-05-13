@@ -1,37 +1,40 @@
 module flux_assembly
-   use kinds,         only : wp
-   use constants,     only : NVAR
-   use mesh_types,    only : t_mesh, t_patch
-   use bc_types,      only : t_bc_data
-   use bc_apply,      only : ghost_state
-   use riemann_hllc,  only : hllc_flux
-   use fields,        only : t_state
-   use mpi_runtime,   only : t_mpi_ctx
-   use halo_exchange, only : halo_pack_and_start, halo_wait
+   use kinds,          only : wp
+   use constants,      only : NVAR, NPRIM, IP_RHO, IP_U, IP_V, IP_W, IP_P
+   use mesh_types,     only : t_mesh, t_patch
+   use bc_types,       only : t_bc_data
+   use bc_apply,       only : ghost_state
+   use eos_ideal_gas,  only : cons_from_prim, prim_from_cons
+   use riemann_hllc,   only : hllc_flux
+   use viscous_fluxes, only : viscous_flux_face
+   use fields,         only : t_state
+   use mpi_runtime,    only : t_mpi_ctx
+   use halo_exchange,  only : halo_pack_and_start, halo_wait
    implicit none
    private
 
-   public :: compute_residual            ! MPI-aware orchestrator
+   public :: compute_residual
    public :: residual_begin
-   public :: residual_pure_interior
-   public :: residual_partition
-   public :: residual_boundary
+   public :: residual_pure_interior, residual_partition, residual_boundary
 
 contains
 
-   ! MPI-aware residual assembly with comm/compute overlap.
-   subroutine compute_residual(mesh, bc_dat, s, ctx)
+   ! MPI-aware orchestrator. (Halos for U and grads must already be
+   ! exchanged by the time-integration driver; this routine only handles
+   ! the state-halo overlap with pure-interior compute.)
+   subroutine compute_residual(mesh, bc_dat, s, ctx, muscl, viscous)
       type(t_mesh),    intent(inout) :: mesh
       type(t_bc_data), intent(in)    :: bc_dat(:)
       type(t_state),   intent(inout) :: s
       type(t_mpi_ctx), intent(in)    :: ctx
+      logical,         intent(in)    :: muscl, viscous
 
       call residual_begin(s)
       call halo_pack_and_start(mesh, s%U, ctx)
-      call residual_pure_interior(mesh, s)
+      call residual_pure_interior(mesh, s, muscl, viscous)
       call halo_wait(mesh, s%U)
-      call residual_partition(mesh, s)
-      call residual_boundary(mesh, bc_dat, s)
+      call residual_partition(mesh, s, muscl, viscous)
+      call residual_boundary(mesh, bc_dat, s, muscl, viscous)
    end subroutine compute_residual
 
    subroutine residual_begin(s)
@@ -39,58 +42,122 @@ contains
       s%R = 0.0_wp
    end subroutine residual_begin
 
-   ! Faces with both cells local; safe to compute while halos are in flight.
-   subroutine residual_pure_interior(mesh, s)
+   subroutine residual_pure_interior(mesh, s, muscl, viscous)
       type(t_mesh),  intent(in)    :: mesh
       type(t_state), intent(inout) :: s
-      integer  :: ifc, c_o, c_n
-      real(wp) :: Fflx(NVAR), nrml(3), area
+      logical,       intent(in)    :: muscl, viscous
+      integer  :: ifc
       do ifc = 1, mesh%nf_pure_interior
-         c_o  = mesh%face_owner(ifc)
-         c_n  = mesh%face_neighbor(ifc)
-         nrml = mesh%face_normal(:, ifc)
-         area = mesh%face_area(ifc)
-         Fflx = hllc_flux(s%U(:, c_o), s%U(:, c_n), nrml)
-         s%R(:, c_o) = s%R(:, c_o) + Fflx * area
-         s%R(:, c_n) = s%R(:, c_n) - Fflx * area
+         call interior_face_residual(mesh, s, ifc, muscl, viscous)
       end do
    end subroutine residual_pure_interior
 
-   ! Partition faces: one local, one ghost. Requires halo data (call after halo_wait).
-   subroutine residual_partition(mesh, s)
+   subroutine residual_partition(mesh, s, muscl, viscous)
       type(t_mesh),  intent(in)    :: mesh
       type(t_state), intent(inout) :: s
-      integer  :: ifc, c_o, c_n
-      real(wp) :: Fflx(NVAR), nrml(3), area
+      logical,       intent(in)    :: muscl, viscous
+      integer  :: ifc
       do ifc = mesh%nf_pure_interior + 1, mesh%nf_interior
-         c_o  = mesh%face_owner(ifc)
-         c_n  = mesh%face_neighbor(ifc)
-         nrml = mesh%face_normal(:, ifc)
-         area = mesh%face_area(ifc)
-         Fflx = hllc_flux(s%U(:, c_o), s%U(:, c_n), nrml)
-         ! Scatter to both — local cell uses it for its residual; ghost-cell residual
-         ! is harmlessly written but won't be used in the RK update (loop runs only
-         ! over [1..nc_internal]).
-         s%R(:, c_o) = s%R(:, c_o) + Fflx * area
-         s%R(:, c_n) = s%R(:, c_n) - Fflx * area
+         call interior_face_residual(mesh, s, ifc, muscl, viscous)
       end do
    end subroutine residual_partition
 
-   ! Physical boundary faces: ghost state from BC, then HLLC.
-   subroutine residual_boundary(mesh, bc_dat, s)
+   subroutine interior_face_residual(mesh, s, ifc, muscl, viscous)
+      type(t_mesh),  intent(in)    :: mesh
+      type(t_state), intent(inout) :: s
+      integer,       intent(in)    :: ifc
+      logical,       intent(in)    :: muscl, viscous
+      integer  :: c_o, c_n
+      real(wp) :: nrml(3), area, drO(3), drN(3)
+      real(wp) :: W_L(NPRIM), W_R(NPRIM), Q_L(NVAR), Q_R(NVAR), Fflx(NVAR)
+      real(wp) :: Wf(NPRIM), gWf(3, NPRIM), Fvis(NVAR)
+      integer  :: v, j
+
+      c_o  = mesh%face_owner(ifc)
+      c_n  = mesh%face_neighbor(ifc)
+      nrml = mesh%face_normal(:, ifc)
+      area = mesh%face_area(ifc)
+
+      drO = mesh%face_centroid(:, ifc) - mesh%cell_centroid(:, c_o)
+      drN = mesh%face_centroid(:, ifc) - mesh%cell_centroid(:, c_n)
+
+      if (muscl) then
+         do v = 1, NPRIM
+            W_L(v) = s%W(v, c_o) + s%psi(v, c_o) * &
+                     (s%gradW(1, v, c_o) * drO(1) + s%gradW(2, v, c_o) * drO(2) + &
+                      s%gradW(3, v, c_o) * drO(3))
+            W_R(v) = s%W(v, c_n) + s%psi(v, c_n) * &
+                     (s%gradW(1, v, c_n) * drN(1) + s%gradW(2, v, c_n) * drN(2) + &
+                      s%gradW(3, v, c_n) * drN(3))
+         end do
+      else
+         W_L = s%W(:, c_o)
+         W_R = s%W(:, c_n)
+      end if
+
+      call cons_from_prim(W_L(IP_RHO), W_L(IP_U), W_L(IP_V), W_L(IP_W), W_L(IP_P), Q_L)
+      call cons_from_prim(W_R(IP_RHO), W_R(IP_U), W_R(IP_V), W_R(IP_W), W_R(IP_P), Q_R)
+      Fflx = hllc_flux(Q_L, Q_R, nrml)
+
+      if (viscous) then
+         Wf = 0.5_wp * (W_L + W_R)
+         do v = 1, NPRIM
+            do j = 1, 3
+               gWf(j, v) = 0.5_wp * (s%gradW(j, v, c_o) + s%gradW(j, v, c_n))
+            end do
+         end do
+         call viscous_flux_face(Wf, gWf, nrml, Fvis)
+         Fflx = Fflx - Fvis
+      end if
+
+      s%R(:, c_o) = s%R(:, c_o) + Fflx * area
+      s%R(:, c_n) = s%R(:, c_n) - Fflx * area
+   end subroutine interior_face_residual
+
+   subroutine residual_boundary(mesh, bc_dat, s, muscl, viscous)
       type(t_mesh),    intent(in)    :: mesh
       type(t_bc_data), intent(in)    :: bc_dat(:)
       type(t_state),   intent(inout) :: s
-      integer  :: ifc, c_o, ip
-      real(wp) :: Fflx(NVAR), QL(NVAR), QR(NVAR), nrml(3), area
+      logical,         intent(in)    :: muscl, viscous
+
+      integer  :: ifc, c_o, ip, v
+      real(wp) :: nrml(3), area, drO(3)
+      real(wp) :: W_L(NPRIM), Q_L(NVAR), Q_R(NVAR), Fflx(NVAR)
+      real(wp) :: W_R(NPRIM), Wf(NPRIM), gWf(3, NPRIM), Fvis(NVAR)
+      real(wp) :: rho_b, u_b, v_b, w_b, p_b
+
       do ifc = mesh%nf_interior + 1, mesh%nf
          c_o  = mesh%face_owner(ifc)
          ip   = mesh%face_patch(ifc)
          nrml = mesh%face_normal(:, ifc)
          area = mesh%face_area(ifc)
-         QL   = s%U(:, c_o)
-         call ghost_state(mesh%patches(ip)%bc_type, bc_dat(ip), QL, nrml, QR)
-         Fflx = hllc_flux(QL, QR, nrml)
+
+         drO = mesh%face_centroid(:, ifc) - mesh%cell_centroid(:, c_o)
+
+         if (muscl) then
+            do v = 1, NPRIM
+               W_L(v) = s%W(v, c_o) + s%psi(v, c_o) * &
+                        (s%gradW(1, v, c_o) * drO(1) + s%gradW(2, v, c_o) * drO(2) + &
+                         s%gradW(3, v, c_o) * drO(3))
+            end do
+         else
+            W_L = s%W(:, c_o)
+         end if
+         call cons_from_prim(W_L(IP_RHO), W_L(IP_U), W_L(IP_V), W_L(IP_W), W_L(IP_P), Q_L)
+         call ghost_state(mesh%patches(ip)%bc_type, bc_dat(ip), Q_L, nrml, Q_R)
+         Fflx = hllc_flux(Q_L, Q_R, nrml)
+
+         if (viscous) then
+            call prim_from_cons(Q_R, rho_b, u_b, v_b, w_b, p_b)
+            W_R(IP_RHO) = rho_b; W_R(IP_U) = u_b; W_R(IP_V) = v_b
+            W_R(IP_W)   = w_b;   W_R(IP_P) = p_b
+            Wf = 0.5_wp * (W_L + W_R)
+            ! Single-sided gradient at boundary (owner gradient).
+            gWf(:, :) = s%gradW(:, :, c_o)
+            call viscous_flux_face(Wf, gWf, nrml, Fvis)
+            Fflx = Fflx - Fvis
+         end if
+
          s%R(:, c_o) = s%R(:, c_o) + Fflx * area
       end do
    end subroutine residual_boundary
