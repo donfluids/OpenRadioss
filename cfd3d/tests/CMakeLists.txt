@@ -25,6 +25,7 @@ add_cfd3d_test(test_mesh_topology)
 add_cfd3d_test(test_sod_shock_tube)
 add_cfd3d_test(test_couette)
 add_cfd3d_test(test_mms_order)
+add_cfd3d_test(test_sedov)
 
 # Working directory for the integration tests — meshes + namelists are generated here.
 set(CASE_WORKDIR "${CMAKE_CURRENT_BINARY_DIR}/sod3d")
@@ -113,6 +114,23 @@ add_test(NAME test_mms_order_les
          WORKING_DIRECTORY "${MMS_LES_WORKDIR}")
 set_tests_properties(test_mms_order_les PROPERTIES
    DEPENDS "generate_mms_les_coarse;generate_mms_les_fine")
+
+# M5.1 Sedov-Taylor blast (point-energy IC, strong-shock capture).
+set(SEDOV_WORKDIR "${CMAKE_CURRENT_BINARY_DIR}/sedov")
+file(MAKE_DIRECTORY "${SEDOV_WORKDIR}")
+configure_file(
+   "${CFD3D_SOURCE_DIR}/cases/sedov/sedov.nml"
+   "${SEDOV_WORKDIR}/sedov.nml" COPYONLY)
+configure_file(
+   "${CFD3D_SOURCE_DIR}/cases/sedov/probes.csv"
+   "${SEDOV_WORKDIR}/probes.csv" COPYONLY)
+add_test(NAME generate_sedov_mesh
+         COMMAND $<TARGET_FILE:gen_sod_mesh> 40 40 40 1.5 1.5 1.5 "${SEDOV_WORKDIR}/sedov.msh"
+         WORKING_DIRECTORY "${SEDOV_WORKDIR}")
+add_test(NAME test_sedov
+         COMMAND $<TARGET_FILE:test_sedov> "${SEDOV_WORKDIR}/sedov.nml"
+         WORKING_DIRECTORY "${SEDOV_WORKDIR}")
+set_tests_properties(test_sedov PROPERTIES DEPENDS generate_sedov_mesh)
 
 # M2 parallel acceptance: same Sod case run on 4 ranks. The mesh is partitioned
 # via METIS, halos exchanged each RK stage, and the global L1 error vs. exact

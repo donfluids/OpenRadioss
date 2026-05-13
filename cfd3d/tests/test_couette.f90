@@ -55,7 +55,7 @@ program test_couette
    call partition_and_load(trim(p%mesh_file), ctx, mesh)
    call assign_patch_bcs(p, mesh, bc_dat)
    call alloc_state(s, mesh)
-   call set_initial_condition(p, mesh, s)
+   call set_initial_condition(p, mesh, s, ctx)
    call halo_init_persistent(mesh, ctx)
    call halo_init_persistent_gp(mesh, ctx)
 

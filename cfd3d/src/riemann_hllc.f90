@@ -57,9 +57,16 @@ contains
       SL = vnL - cL * vnL_factor
       SR = vnR + cR * vnR_factor
 
-      ! Contact wave speed
-      SM = ( pR - pL + rhoL*vnL*(SL - vnL) - rhoR*vnR*(SR - vnR) ) &
-           / ( rhoL*(SL - vnL) - rhoR*(SR - vnR) )
+      ! Contact wave speed. Guard against vanishing denominator at extreme
+      ! pressure ratios (e.g. fresh detonation fronts, p_L/p_R ≳ 10⁴):
+      ! Toro 2009 §10.6 recommends sign-protecting the denominator. With a
+      ! near-zero denominator HLLC degenerates into a one-sided flux anyway.
+      block
+         real(wp) :: denom
+         denom = rhoL*(SL - vnL) - rhoR*(SR - vnR)
+         if (abs(denom) < 1.0e-30_wp) denom = sign(1.0e-30_wp, denom + 1.0e-300_wp)
+         SM = ( pR - pL + rhoL*vnL*(SL - vnL) - rhoR*vnR*(SR - vnR) ) / denom
+      end block
 
       call phys_flux(QL, n, FL)
       call phys_flux(QR, n, FR)
@@ -69,22 +76,29 @@ contains
       else if (SR <= 0.0_wp) then
          F = FR
       else if (SM >= 0.0_wp) then
-         factL = rhoL * (SL - vnL) / (SL - SM)
-         rhoLs = factL
+         ! factL = rhoL * (SL - vnL) / (SL - SM); (SL − SM) and (SL − vnL)
+         ! are both *negative* in the usual case (SL < vnL ≤ SM), so the
+         ! ratio is positive. Floor each denominator away from zero with
+         ! the matching sign to prevent NaN at strong-shock degeneracies.
+         factL = rhoL * (SL - vnL) / min(SL - SM, -1.0e-30_wp)
+         rhoLs = max(factL, TINY_RHO)
          QsL(IRHO)  = rhoLs
          QsL(IRHOU) = rhoLs * (uL + (SM - vnL)*n(1))
          QsL(IRHOV) = rhoLs * (vL + (SM - vnL)*n(2))
          QsL(IRHOW) = rhoLs * (wL + (SM - vnL)*n(3))
-         QsL(IRHOE) = rhoLs * ( EL + (SM - vnL) * (SM + pL / (rhoL * (SL - vnL))) )
+         QsL(IRHOE) = rhoLs * ( EL + (SM - vnL) * &
+                       (SM + pL / min(rhoL * (SL - vnL), -1.0e-30_wp)) )
          F = FL + SL * (QsL - QL)
       else
-         factR = rhoR * (SR - vnR) / (SR - SM)
-         rhoRs = factR
+         ! (SR − SM) and (SR − vnR) are both *positive* in the usual case.
+         factR = rhoR * (SR - vnR) / max(SR - SM, 1.0e-30_wp)
+         rhoRs = max(factR, TINY_RHO)
          QsR(IRHO)  = rhoRs
          QsR(IRHOU) = rhoRs * (uR + (SM - vnR)*n(1))
          QsR(IRHOV) = rhoRs * (vR + (SM - vnR)*n(2))
          QsR(IRHOW) = rhoRs * (wR + (SM - vnR)*n(3))
-         QsR(IRHOE) = rhoRs * ( ER + (SM - vnR) * (SM + pR / (rhoR * (SR - vnR))) )
+         QsR(IRHOE) = rhoRs * ( ER + (SM - vnR) * &
+                       (SM + pR / max(rhoR * (SR - vnR), 1.0e-30_wp)) )
          F = FR + SR * (QsR - QR)
       end if
    end function hllc_flux

@@ -20,11 +20,23 @@ module solver_control
       real(wp) :: output_interval = 0.1_wp
 
       ! Initial condition
-      character(len=32) :: init_type = 'uniform'  ! 'uniform' | 'riemann' | 'mms'
+      character(len=32) :: init_type = 'uniform'  ! 'uniform' | 'riemann' | 'mms' | 'sedov' | 'blast_bubble'
       integer  :: diaphragm_axis = 1
       real(wp) :: diaphragm_pos  = 0.0_wp
       real(wp) :: rho_L = 1.0_wp, u_L = 0.0_wp, v_L = 0.0_wp, w_L = 0.0_wp, p_L = 1.0_wp
       real(wp) :: rho_R = 1.0_wp, u_R = 0.0_wp, v_R = 0.0_wp, w_R = 0.0_wp, p_R = 1.0_wp
+
+      ! Blast-IC parameters (M5.1).
+      real(wp) :: blast_center(3) = [0.0_wp, 0.0_wp, 0.0_wp]
+      real(wp) :: blast_radius    = 0.05_wp     ! sphere radius for hotspot
+      real(wp) :: blast_energy    = 0.0_wp      ! Sedov: total energy to deposit
+      real(wp) :: blast_p         = 1.0_wp      ! blast_bubble: hot-region pressure
+      real(wp) :: blast_rho       = 1.0_wp      ! blast_bubble: hot-region density
+      real(wp) :: ambient_p       = 1.0_wp      ! ambient pressure outside hotspot
+      real(wp) :: ambient_rho     = 1.0_wp      ! ambient density outside hotspot
+
+      ! Probe output (M5.1). Empty path disables probe output.
+      character(len=256) :: probes_file = ''
 
       ! Scheme toggles (M3)
       logical  :: muscl_enabled    = .true.    ! 2nd-order MUSCL with Venkat limiter
@@ -75,6 +87,9 @@ contains
       real(wp) :: diaphragm_pos
       real(wp) :: rho_L, u_L, v_L, w_L, p_L
       real(wp) :: rho_R, u_R, v_R, w_R, p_R
+      real(wp) :: blast_center(3), blast_radius, blast_energy, blast_p, blast_rho
+      real(wp) :: ambient_p, ambient_rho
+      character(len=256) :: probes_file
       logical  :: muscl_enabled, viscous_enabled, mms_enabled, sutherland
       real(wp) :: venkat_K
       real(wp) :: R_gas, mu_const, mu_ref, T_ref, S_S, Pr
@@ -95,6 +110,8 @@ contains
          muscl_enabled, venkat_K, viscous_enabled, mms_enabled, &
          R_gas, sutherland, mu_const, mu_ref, T_ref, S_S, Pr, &
          sgs_model, C_s, C_w, Pr_t, &
+         blast_center, blast_radius, blast_energy, blast_p, blast_rho, &
+         ambient_p, ambient_rho, probes_file, &
          patch_count, patch_name, patch_bc, &
          patch_rho, patch_u, patch_v, patch_w, patch_p
 
@@ -113,6 +130,14 @@ contains
       diaphragm_pos   = p%diaphragm_pos
       rho_L = p%rho_L; u_L = p%u_L; v_L = p%v_L; w_L = p%w_L; p_L = p%p_L
       rho_R = p%rho_R; u_R = p%u_R; v_R = p%v_R; w_R = p%w_R; p_R = p%p_R
+      blast_center = p%blast_center
+      blast_radius = p%blast_radius
+      blast_energy = p%blast_energy
+      blast_p      = p%blast_p
+      blast_rho    = p%blast_rho
+      ambient_p    = p%ambient_p
+      ambient_rho  = p%ambient_rho
+      probes_file  = p%probes_file
       muscl_enabled   = p%muscl_enabled
       venkat_K        = p%venkat_K
       viscous_enabled = p%viscous_enabled
@@ -161,6 +186,14 @@ contains
       p%diaphragm_pos   = diaphragm_pos
       p%rho_L = rho_L; p%u_L = u_L; p%v_L = v_L; p%w_L = w_L; p%p_L = p_L
       p%rho_R = rho_R; p%u_R = u_R; p%v_R = v_R; p%w_R = w_R; p%p_R = p_R
+      p%blast_center = blast_center
+      p%blast_radius = blast_radius
+      p%blast_energy = blast_energy
+      p%blast_p      = blast_p
+      p%blast_rho    = blast_rho
+      p%ambient_p    = ambient_p
+      p%ambient_rho  = ambient_rho
+      p%probes_file  = probes_file
       p%muscl_enabled   = muscl_enabled
       p%venkat_K        = venkat_K
       p%viscous_enabled = viscous_enabled

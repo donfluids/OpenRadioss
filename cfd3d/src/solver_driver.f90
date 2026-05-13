@@ -13,6 +13,8 @@ module solver_driver
    use halo_exchange,    only : halo_init_persistent, halo_free_persistent, &
                                 halo_init_persistent_gp, halo_free_persistent_gp
    use gas_properties,   only : init_gas
+   use probes,           only : t_probe_set, probes_load, probes_locate, &
+                                probes_sample, probes_flush, probes_free
    implicit none
    private
 
@@ -27,6 +29,7 @@ contains
       type(t_mesh)    :: mesh
       type(t_state)   :: s
       type(t_bc_data), allocatable :: bc_dat(:)
+      type(t_probe_set) :: probes
 
       real(wp) :: t, dt, next_out
       integer  :: step, out_idx
@@ -39,9 +42,11 @@ contains
       call partition_and_load(trim(p%mesh_file), ctx, mesh)
       call assign_patch_bcs(p, mesh, bc_dat)
       call alloc_state(s, mesh)
-      call set_initial_condition(p, mesh, s)
+      call set_initial_condition(p, mesh, s, ctx)
       call halo_init_persistent(mesh, ctx)
       call halo_init_persistent_gp(mesh, ctx)
+      call probes_load(trim(p%probes_file), trim(p%case_name), trim(p%output_dir), ctx, probes)
+      call probes_locate(mesh, ctx, probes)
 
       write(*,'(A,I0,A,I0,A,I0,A,I0,A,I0,A,I0,A,I0,A,I0)') &
          'rank=', ctx%rank, &
@@ -59,12 +64,14 @@ contains
       t = 0.0_wp
       next_out = p%output_interval
       step = 0
+      call probes_sample(mesh, s, t, ctx, probes)
       do while (t < p%t_end .and. step < p%max_steps)
          dt = compute_dt(mesh, s, p%cfl, ctx, p%viscous_enabled)
          if (t + dt > p%t_end) dt = p%t_end - t
          call rk3_step(mesh, bc_dat, s, dt, ctx, p%muscl_enabled, p%viscous_enabled, p%venkat_K)
          t = t + dt
          step = step + 1
+         call probes_sample(mesh, s, t, ctx, probes)
          if (ctx%is_root .and. mod(step, 50) == 0) then
             write(*,'(A,I7,A,1PE12.5,A,1PE12.5)') &
                'step ', step, '  t=', t, '  dt=', dt
@@ -77,7 +84,9 @@ contains
 
       ! Final dump
       call write_one(p, mesh, s, t, ctx, out_idx, outfile)
+      call probes_flush(probes, ctx)
 
+      call probes_free(probes)
       call halo_free_persistent_gp(mesh)
       call halo_free_persistent(mesh)
       call free_state(s)
@@ -118,13 +127,16 @@ contains
       end do
    end subroutine assign_patch_bcs
 
-   subroutine set_initial_condition(p, mesh, s)
+   subroutine set_initial_condition(p, mesh, s, ctx)
+      use mpi_f08
+      use constants,     only : GM1
       type(t_run_params), intent(in)    :: p
       type(t_mesh),       intent(in)    :: mesh
       type(t_state),      intent(inout) :: s
+      type(t_mpi_ctx),    intent(in)    :: ctx
 
       integer :: c, ax
-      real(wp) :: pos, U(NVAR)
+      real(wp) :: pos, U(NVAR), dx, dy, dz, r2, rblast2
 
       select case (trim(p%init_type))
       case ('uniform')
@@ -146,11 +158,79 @@ contains
                call cons_from_prim(p%rho_R, p%u_R, p%v_R, p%w_R, p%p_R, s%U(:, c))
             end if
          end do
+      case ('blast_bubble')
+         ! Hot region: rho=blast_rho, p=blast_p inside sphere; ambient outside.
+         rblast2 = p%blast_radius * p%blast_radius
+         do c = 1, mesh%nc_total
+            dx = mesh%cell_centroid(1, c) - p%blast_center(1)
+            dy = mesh%cell_centroid(2, c) - p%blast_center(2)
+            dz = mesh%cell_centroid(3, c) - p%blast_center(3)
+            r2 = dx*dx + dy*dy + dz*dz
+            if (r2 <= rblast2) then
+               call cons_from_prim(p%blast_rho, 0.0_wp, 0.0_wp, 0.0_wp, p%blast_p, s%U(:, c))
+            else
+               call cons_from_prim(p%ambient_rho, 0.0_wp, 0.0_wp, 0.0_wp, p%ambient_p, s%U(:, c))
+            end if
+         end do
+      case ('sedov')
+         ! Sedov-Taylor: deposit total energy E into the sphere of radius
+         ! blast_radius around blast_center. p_hot = (γ-1)·E / V_region with
+         ! V_region globally summed over MPI ranks for consistency.
+         call init_sedov_state(p, mesh, s, ctx)
       case default
          write(*,'(A,A)') 'set_initial_condition: unknown init_type ', trim(p%init_type)
          error stop 1
       end select
    end subroutine set_initial_condition
+
+   subroutine init_sedov_state(p, mesh, s, ctx)
+      use mpi_f08
+      use constants, only : GM1
+      type(t_run_params), intent(in)    :: p
+      type(t_mesh),       intent(in)    :: mesh
+      type(t_state),      intent(inout) :: s
+      type(t_mpi_ctx),    intent(in)    :: ctx
+
+      integer  :: c
+      real(wp) :: dx, dy, dz, r2, rblast2, V_local, V_global, p_hot
+
+      rblast2 = p%blast_radius * p%blast_radius
+
+      ! First pass: count hot-region volume on local cells.
+      V_local = 0.0_wp
+      do c = 1, mesh%nc_internal
+         dx = mesh%cell_centroid(1, c) - p%blast_center(1)
+         dy = mesh%cell_centroid(2, c) - p%blast_center(2)
+         dz = mesh%cell_centroid(3, c) - p%blast_center(3)
+         r2 = dx*dx + dy*dy + dz*dz
+         if (r2 <= rblast2) V_local = V_local + mesh%cell_volume(c)
+      end do
+      if (ctx%nproc > 1) then
+         call MPI_Allreduce(V_local, V_global, 1, MPI_DOUBLE_PRECISION, MPI_SUM, ctx%comm)
+      else
+         V_global = V_local
+      end if
+      if (V_global <= 0.0_wp) then
+         if (ctx%is_root) write(*,'(A)') &
+            'init_sedov_state: no cells inside blast_radius; refine the mesh or increase blast_radius'
+         error stop 1
+      end if
+      p_hot = GM1 * p%blast_energy / V_global
+
+      ! Second pass: write state. ghosts get the same treatment so partition
+      ! faces see consistent ICs before the first halo exchange.
+      do c = 1, mesh%nc_total
+         dx = mesh%cell_centroid(1, c) - p%blast_center(1)
+         dy = mesh%cell_centroid(2, c) - p%blast_center(2)
+         dz = mesh%cell_centroid(3, c) - p%blast_center(3)
+         r2 = dx*dx + dy*dy + dz*dz
+         if (r2 <= rblast2) then
+            call cons_from_prim(p%ambient_rho, 0.0_wp, 0.0_wp, 0.0_wp, p_hot, s%U(:, c))
+         else
+            call cons_from_prim(p%ambient_rho, 0.0_wp, 0.0_wp, 0.0_wp, p%ambient_p, s%U(:, c))
+         end if
+      end do
+   end subroutine init_sedov_state
 
    subroutine write_one(p, mesh, s, t, ctx, idx, outfile)
       type(t_run_params),  intent(in)    :: p

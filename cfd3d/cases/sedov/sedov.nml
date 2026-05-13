@@ -1,0 +1,36 @@
+&cfd3d
+  mesh_file       = 'sedov.msh'
+  case_name       = 'sedov'
+  output_dir      = '.'
+  t_end           = 0.04
+  cfl             = 0.5
+  max_steps       = 5000
+  output_interval = 0.01
+
+  init_type       = 'sedov'
+  blast_center    = 0.75, 0.75, 0.75
+  blast_radius    = 0.05
+  blast_energy    = 30.0
+  ambient_rho     = 1.0
+  ambient_p       = 1.0
+
+  muscl_enabled   = .true.
+  venkat_K        = 5.0
+  viscous_enabled = .false.
+
+  probes_file     = 'probes.csv'
+
+  patch_count   = 6
+  patch_name(1) = 'x_min'
+  patch_bc(1)   = 'slip_wall'
+  patch_name(2) = 'x_max'
+  patch_bc(2)   = 'slip_wall'
+  patch_name(3) = 'y_min'
+  patch_bc(3)   = 'slip_wall'
+  patch_name(4) = 'y_max'
+  patch_bc(4)   = 'slip_wall'
+  patch_name(5) = 'z_min'
+  patch_bc(5)   = 'slip_wall'
+  patch_name(6) = 'z_max'
+  patch_bc(6)   = 'slip_wall'
+/

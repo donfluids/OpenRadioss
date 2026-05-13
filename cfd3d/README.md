@@ -3,7 +3,19 @@
 Unstructured finite-volume solver for the compressible Navier-Stokes equations
 in modern Fortran (2008+), MPI-parallel.
 
-**Status — Milestone 4:** MPI compressible **Navier-Stokes** with second-order
+**Status — Milestone 5.1:** Blast-IC plumbing landed on the M4 stack —
+spherical Sedov-Taylor and `blast_bubble` initial conditions, point-gauge
+("probe") output to per-probe CSV files, and HLLC positivity guards for
+high pressure-ratio Riemann problems. Acceptance: 3-D Sedov-Taylor blast
+shock-radius matches the analytical `R(t) = ξ₀(E/ρ_∞)^{1/5} t^{2/5}` to
+**5.6 %** at N=40³ (target ≤ 10 %). 17/17 ctest tests pass.
+
+This is the first sub-phase of M5 (TNT blast in/external to a rigid 3-D
+structure). M5.2 adds multi-gas / JWL EOS for TNT detonation products,
+M5.3 adds external blast on a rigid cube, M5.4 adds internal blast in a
+vented room.
+
+**Earlier — Milestone 4:** MPI compressible **Navier-Stokes** with second-order
 MUSCL reconstruction and an **algebraic SGS LES** model (Smagorinsky / WALE).
 The SGS eddy viscosity drops into `viscous_flux_face` via `μ_eff = μ + ρ ν_t`
 and `k_eff = μ cp/Pr + ρ ν_t cp/Pr_t`, with the filter width `Δ = V_cell^(1/3)`
