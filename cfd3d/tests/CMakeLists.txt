@@ -28,6 +28,7 @@ add_cfd3d_test(test_mms_order)
 add_cfd3d_test(test_sedov)
 add_cfd3d_test(test_eos_jwl)
 add_cfd3d_test(test_blast_overpressure)
+add_cfd3d_test(test_blast_cube)
 
 # Working directory for the integration tests — meshes + namelists are generated here.
 set(CASE_WORKDIR "${CMAKE_CURRENT_BINARY_DIR}/sod3d")
@@ -154,6 +155,31 @@ add_test(NAME test_blast_overpressure
          WORKING_DIRECTORY "${BLAST_WORKDIR}")
 set_tests_properties(test_blast_overpressure PROPERTIES
    DEPENDS generate_blast_freefield_mesh)
+
+# M5.3: external blast on a rigid cube. 0.6 m domain, 30^3 hex grid with
+# a 0.1 m cube cut out at [0.4,0.5]x[0.25,0.35]^2. Slip-wall on cube
+# faces, farfield outside. Smoke-test scope: confirm front-face shock
+# reflection and back-face shadowing — full ConWep reflected-overpressure
+# comparison requires finer mesh + full-scale charge.
+set(BLAST_CUBE_WORKDIR "${CMAKE_CURRENT_BINARY_DIR}/blast_cube")
+file(MAKE_DIRECTORY "${BLAST_CUBE_WORKDIR}")
+configure_file(
+   "${CFD3D_SOURCE_DIR}/cases/blast_cube/blast_cube.nml"
+   "${BLAST_CUBE_WORKDIR}/blast_cube.nml" COPYONLY)
+configure_file(
+   "${CFD3D_SOURCE_DIR}/cases/blast_cube/probes.csv"
+   "${BLAST_CUBE_WORKDIR}/probes.csv" COPYONLY)
+add_test(NAME generate_blast_cube_mesh
+         COMMAND $<TARGET_FILE:gen_box_with_cube>
+                 30 30 30 0.6 0.6 0.6
+                 0.4 0.25 0.25 0.1 0.1 0.1
+                 "${BLAST_CUBE_WORKDIR}/blast_cube.msh"
+         WORKING_DIRECTORY "${BLAST_CUBE_WORKDIR}")
+add_test(NAME test_blast_cube
+         COMMAND $<TARGET_FILE:test_blast_cube> "${BLAST_CUBE_WORKDIR}/blast_cube.nml"
+         WORKING_DIRECTORY "${BLAST_CUBE_WORKDIR}")
+set_tests_properties(test_blast_cube PROPERTIES
+   DEPENDS generate_blast_cube_mesh)
 
 # M2 parallel acceptance: same Sod case run on 4 ranks. The mesh is partitioned
 # via METIS, halos exchanged each RK stage, and the global L1 error vs. exact

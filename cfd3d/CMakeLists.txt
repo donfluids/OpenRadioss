@@ -103,5 +103,14 @@ target_compile_options(gen_sod_mesh PRIVATE
 set_target_properties(gen_sod_mesh PROPERTIES
    Fortran_MODULE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/mod_gen")
 
+# Mesh generator for the external-blast-on-cube test case (standalone, no deps)
+add_executable(gen_box_with_cube cases/blast_cube/gen_box_with_cube.f90)
+target_compile_options(gen_box_with_cube PRIVATE
+   ${CFD3D_FFLAGS_COMMON}
+   $<$<CONFIG:Release>:${CFD3D_FFLAGS_RELEASE}>
+   $<$<CONFIG:Debug>:${CFD3D_FFLAGS_DEBUG}>)
+set_target_properties(gen_box_with_cube PROPERTIES
+   Fortran_MODULE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/mod_gen_cube")
+
 enable_testing()
 add_subdirectory(tests)
