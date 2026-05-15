@@ -29,6 +29,7 @@ add_cfd3d_test(test_sedov)
 add_cfd3d_test(test_eos_jwl)
 add_cfd3d_test(test_blast_overpressure)
 add_cfd3d_test(test_blast_cube)
+add_cfd3d_test(test_blast_room)
 
 # Working directory for the integration tests — meshes + namelists are generated here.
 set(CASE_WORKDIR "${CMAKE_CURRENT_BINARY_DIR}/sod3d")
@@ -180,6 +181,30 @@ add_test(NAME test_blast_cube
          WORKING_DIRECTORY "${BLAST_CUBE_WORKDIR}")
 set_tests_properties(test_blast_cube PROPERTIES
    DEPENDS generate_blast_cube_mesh)
+
+# M5.4: internal blast in a vented room. 1 m^3 hex mesh (30^3); five
+# faces are slip walls, one face has a 0.25 x 0.25 m vent (farfield).
+# Smoke-test scope: confirm back-wall reflection and that the vent
+# does not reflect (the near-vent peak is below the back-wall peak).
+set(BLAST_ROOM_WORKDIR "${CMAKE_CURRENT_BINARY_DIR}/blast_room")
+file(MAKE_DIRECTORY "${BLAST_ROOM_WORKDIR}")
+configure_file(
+   "${CFD3D_SOURCE_DIR}/cases/blast_room/blast_room.nml"
+   "${BLAST_ROOM_WORKDIR}/blast_room.nml" COPYONLY)
+configure_file(
+   "${CFD3D_SOURCE_DIR}/cases/blast_room/probes.csv"
+   "${BLAST_ROOM_WORKDIR}/probes.csv" COPYONLY)
+add_test(NAME generate_blast_room_mesh
+         COMMAND $<TARGET_FILE:gen_box_with_vent>
+                 30 30 30 1.0 1.0 1.0
+                 0.375 0.375 0.25 0.25
+                 "${BLAST_ROOM_WORKDIR}/blast_room.msh"
+         WORKING_DIRECTORY "${BLAST_ROOM_WORKDIR}")
+add_test(NAME test_blast_room
+         COMMAND $<TARGET_FILE:test_blast_room> "${BLAST_ROOM_WORKDIR}/blast_room.nml"
+         WORKING_DIRECTORY "${BLAST_ROOM_WORKDIR}")
+set_tests_properties(test_blast_room PROPERTIES
+   DEPENDS generate_blast_room_mesh)
 
 # M2 parallel acceptance: same Sod case run on 4 ranks. The mesh is partitioned
 # via METIS, halos exchanged each RK stage, and the global L1 error vs. exact

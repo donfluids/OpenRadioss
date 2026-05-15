@@ -112,5 +112,14 @@ target_compile_options(gen_box_with_cube PRIVATE
 set_target_properties(gen_box_with_cube PROPERTIES
    Fortran_MODULE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/mod_gen_cube")
 
+# Mesh generator for the internal-blast-in-vented-room test case (standalone, no deps)
+add_executable(gen_box_with_vent cases/blast_room/gen_box_with_vent.f90)
+target_compile_options(gen_box_with_vent PRIVATE
+   ${CFD3D_FFLAGS_COMMON}
+   $<$<CONFIG:Release>:${CFD3D_FFLAGS_RELEASE}>
+   $<$<CONFIG:Debug>:${CFD3D_FFLAGS_DEBUG}>)
+set_target_properties(gen_box_with_vent PROPERTIES
+   Fortran_MODULE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/mod_gen_vent")
+
 enable_testing()
 add_subdirectory(tests)
