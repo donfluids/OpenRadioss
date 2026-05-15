@@ -1,0 +1,10 @@
+# L-shaped-room probes (charge at the far end of the top arm).
+# top_far    — same arm as charge; sees direct shock + far-wall reflection.
+# corner     — inside corner of the L; shock must diffract around the bend.
+# bot_far    — opposite arm; shock must turn the corner to reach it.
+# obs_front  — just upstream of the cube obstacle, in the bottom arm.
+# name,        x,     y,     z
+top_far,     0.250, 0.950, 0.500
+corner,      0.450, 0.450, 0.500
+bot_far,     0.900, 0.250, 0.500
+obs_front,   0.550, 0.225, 0.500

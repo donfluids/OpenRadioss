@@ -121,5 +121,16 @@ target_compile_options(gen_box_with_vent PRIVATE
 set_target_properties(gen_box_with_vent PROPERTIES
    Fortran_MODULE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/mod_gen_vent")
 
+# General room mesh generator (polygonal floor + extrusion + vents +
+# axis-aligned cube obstacles). Spec-file driven; emits three physical
+# tags: walls, vent_outside, obstacle_faces. Standalone, no deps.
+add_executable(gen_room_mesh cases/blast_l_room/gen_room_mesh.f90)
+target_compile_options(gen_room_mesh PRIVATE
+   ${CFD3D_FFLAGS_COMMON}
+   $<$<CONFIG:Release>:${CFD3D_FFLAGS_RELEASE}>
+   $<$<CONFIG:Debug>:${CFD3D_FFLAGS_DEBUG}>)
+set_target_properties(gen_room_mesh PROPERTIES
+   Fortran_MODULE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/mod_gen_room")
+
 enable_testing()
 add_subdirectory(tests)

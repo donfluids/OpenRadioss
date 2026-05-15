@@ -30,6 +30,7 @@ add_cfd3d_test(test_eos_jwl)
 add_cfd3d_test(test_blast_overpressure)
 add_cfd3d_test(test_blast_cube)
 add_cfd3d_test(test_blast_room)
+add_cfd3d_test(test_blast_l_room)
 
 # Working directory for the integration tests — meshes + namelists are generated here.
 set(CASE_WORKDIR "${CMAKE_CURRENT_BINARY_DIR}/sod3d")
@@ -205,6 +206,31 @@ add_test(NAME test_blast_room
          WORKING_DIRECTORY "${BLAST_ROOM_WORKDIR}")
 set_tests_properties(test_blast_room PROPERTIES
    DEPENDS generate_blast_room_mesh)
+
+# Arbitrary-shaped room: 1 m^3 bbox, L-shaped polygonal floor, one
+# 0.15 m cube obstacle in the bottom arm, one 0.2x0.2 m vent on the
+# x_max face. Driven by a spec file consumed by gen_room_mesh.
+set(BLAST_L_ROOM_WORKDIR "${CMAKE_CURRENT_BINARY_DIR}/blast_l_room")
+file(MAKE_DIRECTORY "${BLAST_L_ROOM_WORKDIR}")
+configure_file(
+   "${CFD3D_SOURCE_DIR}/cases/blast_l_room/blast_l_room.nml"
+   "${BLAST_L_ROOM_WORKDIR}/blast_l_room.nml" COPYONLY)
+configure_file(
+   "${CFD3D_SOURCE_DIR}/cases/blast_l_room/probes.csv"
+   "${BLAST_L_ROOM_WORKDIR}/probes.csv" COPYONLY)
+configure_file(
+   "${CFD3D_SOURCE_DIR}/cases/blast_l_room/blast_l_room.spec"
+   "${BLAST_L_ROOM_WORKDIR}/blast_l_room.spec" COPYONLY)
+add_test(NAME generate_blast_l_room_mesh
+         COMMAND $<TARGET_FILE:gen_room_mesh>
+                 "${BLAST_L_ROOM_WORKDIR}/blast_l_room.spec"
+                 "${BLAST_L_ROOM_WORKDIR}/blast_l_room.msh"
+         WORKING_DIRECTORY "${BLAST_L_ROOM_WORKDIR}")
+add_test(NAME test_blast_l_room
+         COMMAND $<TARGET_FILE:test_blast_l_room> "${BLAST_L_ROOM_WORKDIR}/blast_l_room.nml"
+         WORKING_DIRECTORY "${BLAST_L_ROOM_WORKDIR}")
+set_tests_properties(test_blast_l_room PROPERTIES
+   DEPENDS generate_blast_l_room_mesh)
 
 # M2 parallel acceptance: same Sod case run on 4 ranks. The mesh is partitioned
 # via METIS, halos exchanged each RK stage, and the global L1 error vs. exact
