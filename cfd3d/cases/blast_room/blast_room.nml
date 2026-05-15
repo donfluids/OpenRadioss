@@ -1,0 +1,34 @@
+&cfd3d
+  mesh_file       = 'blast_room.msh'
+  case_name       = 'blast_room'
+  output_dir      = '.'
+  t_end           = 3.0e-3
+  cfl             = 0.4
+  max_steps       = 20000
+  output_interval = 3.0e-3
+
+  ! 5 g TNT-equivalent charge at the centre of a 1 m^3 room with a
+  ! 0.25 m x 0.25 m vent (centered on the x_max wall). Energy is
+  ! deposited at ambient density in a 0.08 m sphere — same
+  ! fluid-energy-equivalent IC as blast_freefield / blast_cube.
+  init_type       = 'tnt_charge'
+  blast_center    = 0.5, 0.5, 0.5
+  blast_radius    = 0.08
+  tnt_mass        = 0.005
+  tnt_specific_E  = 4.184e6
+  ambient_rho     = 1.225
+  ambient_p       = 101325.0
+  R_gas           = 287.05
+
+  muscl_enabled   = .true.
+  venkat_K        = 5.0
+  viscous_enabled = .false.
+
+  probes_file     = 'probes.csv'
+
+  patch_count   = 2
+  patch_name(1) = 'walls'
+  patch_bc(1)   = 'slip_wall'
+  patch_name(2) = 'vent_outside'
+  patch_bc(2)   = 'farfield'
+/

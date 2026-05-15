@@ -29,3 +29,8 @@ add_subdirectory(${actual_directory}/engine)
 message (STATUS "engine name : ${EXEC_NAME} ")
 endif()
 
+if ( ${build} STREQUAL "cfd3d" )
+message (STATUS "Building cfd3d (3D unstructured FV CFD solver)")
+add_subdirectory(${actual_directory}/cfd3d)
+endif()
+

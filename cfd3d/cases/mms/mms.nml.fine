@@ -1,0 +1,38 @@
+&cfd3d
+  mesh_file       = 'mms_fine.msh'
+  case_name       = 'mms_fine'
+  output_dir      = '.'
+  t_end           = 0.0
+  cfl             = 0.5
+  max_steps       = 1
+  output_interval = 1.0
+
+  init_type      = 'uniform'
+  rho_L = 1.0
+  u_L   = 0.0
+  v_L   = 0.0
+  w_L   = 0.0
+  p_L   = 10.0
+
+  muscl_enabled   = .true.
+  venkat_K        = 5.0
+  viscous_enabled = .true.
+  R_gas           = 1.0
+  sutherland      = .false.
+  mu_const        = 0.05
+  Pr              = 0.72
+
+  patch_count   = 6
+  patch_name(1) = 'x_min'
+  patch_bc(1)   = 'slip_wall'
+  patch_name(2) = 'x_max'
+  patch_bc(2)   = 'slip_wall'
+  patch_name(3) = 'y_min'
+  patch_bc(3)   = 'slip_wall'
+  patch_name(4) = 'y_max'
+  patch_bc(4)   = 'slip_wall'
+  patch_name(5) = 'z_min'
+  patch_bc(5)   = 'slip_wall'
+  patch_name(6) = 'z_max'
+  patch_bc(6)   = 'slip_wall'
+/

@@ -1,0 +1,8 @@
+# blast_cube probes — 0.1 m rigid cube at [0.4,0.5]x[0.25,0.35]^2,
+# charge at (0.3, 0.3, 0.3), standoff 0.15 m (cube front face).
+# Probes sit one cell off each face so they're inside air cells.
+# name, x, y, z
+front, 0.395, 0.300, 0.300
+back,  0.505, 0.300, 0.300
+top,   0.450, 0.300, 0.355
+side,  0.450, 0.355, 0.300

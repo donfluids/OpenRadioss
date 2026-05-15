@@ -1,0 +1,41 @@
+&cfd3d
+  mesh_file       = 'blast_freefield.msh'
+  case_name       = 'blast_freefield'
+  output_dir      = '.'
+  t_end           = 6.0e-4
+  cfl             = 0.4
+  max_steps       = 10000
+  output_interval = 6.0e-4
+
+  ! 0.001 kg (1 g) TNT charge centred in a 0.6 m cube. The mesh runs from
+  ! 0 to 0.6 m; centre = (0.3, 0.3, 0.3). The deposited-energy approach
+  ! places E_TNT in a sphere of radius blast_radius around the centre.
+  init_type       = 'tnt_charge'
+  blast_center    = 0.3, 0.3, 0.3
+  blast_radius    = 0.03
+  tnt_mass        = 0.001
+  tnt_specific_E  = 4.184e6
+  ambient_rho     = 1.225
+  ambient_p       = 101325.0
+  R_gas           = 287.05
+
+  muscl_enabled   = .true.
+  venkat_K        = 5.0
+  viscous_enabled = .false.
+
+  probes_file     = 'probes.csv'
+
+  patch_count   = 6
+  patch_name(1) = 'x_min'
+  patch_bc(1)   = 'slip_wall'
+  patch_name(2) = 'x_max'
+  patch_bc(2)   = 'slip_wall'
+  patch_name(3) = 'y_min'
+  patch_bc(3)   = 'slip_wall'
+  patch_name(4) = 'y_max'
+  patch_bc(4)   = 'slip_wall'
+  patch_name(5) = 'z_min'
+  patch_bc(5)   = 'slip_wall'
+  patch_name(6) = 'z_max'
+  patch_bc(6)   = 'slip_wall'
+/

@@ -1,0 +1,33 @@
+&cfd3d
+  mesh_file       = 'blast_cube.msh'
+  case_name       = 'blast_cube'
+  output_dir      = '.'
+  t_end           = 3.0e-4
+  cfl             = 0.4
+  max_steps       = 10000
+  output_interval = 3.0e-4
+
+  ! 0.001 kg (1 g) TNT at (0.3,0.3,0.3) in a 0.6 m cube.
+  ! A 0.1 m rigid cube sits at [0.4,0.5]x[0.25,0.35]^2 — front-face
+  ! standoff = 0.15 m from the charge.
+  init_type       = 'tnt_charge'
+  blast_center    = 0.3, 0.3, 0.3
+  blast_radius    = 0.03
+  tnt_mass        = 0.001
+  tnt_specific_E  = 4.184e6
+  ambient_rho     = 1.225
+  ambient_p       = 101325.0
+  R_gas           = 287.05
+
+  muscl_enabled   = .true.
+  venkat_K        = 5.0
+  viscous_enabled = .false.
+
+  probes_file     = 'probes.csv'
+
+  patch_count   = 2
+  patch_name(1) = 'farfield'
+  patch_bc(1)   = 'farfield'
+  patch_name(2) = 'cube_faces'
+  patch_bc(2)   = 'slip_wall'
+/
