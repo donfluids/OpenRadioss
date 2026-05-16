@@ -109,6 +109,21 @@ module mesh_types
       ! Ghost cells [nc_internal+1..nc_total] have owner_rank = neighbor rank.
       integer, allocatable :: cell_global_id (:)       ! (nc_total)
       integer, allocatable :: cell_owner_rank(:)       ! (nc_total)
+
+      ! Cut-cell tables (Phase 1b). Populated by cut_cell::build_cut_cell_tables
+      ! after build_metrics. For meshes with no obstacle cubes these are
+      ! initialised to copies of cell_volume / face_area, and n_frags = 0.
+      ! For meshes with obstacle cubes, per-cell V_eff < V_full where
+      ! the cube clips the cell, per-face A_eff < A_full where the cube
+      ! covers the face, and fragments carry the obstacle-surface
+      ! geometry (outward normal, area, centroid) inside each cut cell.
+      real(wp), allocatable :: cell_vol_eff (:)        ! (nc_total)
+      real(wp), allocatable :: face_area_eff(:)        ! (nf)
+      integer  :: n_frags = 0
+      integer,  allocatable :: cell_frag_offset(:)     ! (nc_total+1) CSR
+      real(wp), allocatable :: frag_normal  (:,:)      ! (3, n_frags) outward from cell
+      real(wp), allocatable :: frag_area    (:)        ! (n_frags)
+      real(wp), allocatable :: frag_centroid(:,:)      ! (3, n_frags)
    end type t_mesh
 
 contains

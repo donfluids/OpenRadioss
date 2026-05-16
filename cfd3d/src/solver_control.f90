@@ -8,7 +8,8 @@ module solver_control
 
    public :: t_run_params, read_namelist, bc_string_to_int, sgs_string_to_int
 
-   integer, parameter, public :: MAX_PATCHES = 32
+   integer, parameter, public :: MAX_PATCHES   = 32
+   integer, parameter, public :: MAX_OBSTACLES = 64
 
    type :: t_run_params
       character(len=256) :: mesh_file = ''
@@ -74,6 +75,14 @@ module solver_control
       real(wp) :: patch_v  (MAX_PATCHES) = 0.0_wp
       real(wp) :: patch_w  (MAX_PATCHES) = 0.0_wp
       real(wp) :: patch_p  (MAX_PATCHES) = 1.0_wp
+
+      ! Cut-cell obstacle list (Phase 1b). Each entry is an axis-aligned
+      ! cube specified by its (xmin,ymin,zmin) and (xmax,ymax,zmax)
+      ! corners. Consumed by cut_cell::build_cut_cell_tables after
+      ! mesh metrics are built.
+      integer  :: n_obstacles = 0
+      real(wp) :: obstacle_cube_lo(3, MAX_OBSTACLES) = 0.0_wp
+      real(wp) :: obstacle_cube_hi(3, MAX_OBSTACLES) = 0.0_wp
    end type t_run_params
 
 contains
@@ -110,6 +119,9 @@ contains
       real(wp) :: patch_v  (MAX_PATCHES)
       real(wp) :: patch_w  (MAX_PATCHES)
       real(wp) :: patch_p  (MAX_PATCHES)
+      integer  :: n_obstacles
+      real(wp) :: obstacle_cube_lo(3, MAX_OBSTACLES)
+      real(wp) :: obstacle_cube_hi(3, MAX_OBSTACLES)
 
       namelist /cfd3d/ mesh_file, case_name, output_dir, t_end, cfl, &
          output_interval, max_steps, init_type, diaphragm_axis, diaphragm_pos, &
@@ -120,7 +132,8 @@ contains
          blast_center, blast_radius, blast_energy, blast_p, blast_rho, &
          ambient_p, ambient_rho, tnt_mass, tnt_specific_E, probes_file, &
          patch_count, patch_name, patch_bc, &
-         patch_rho, patch_u, patch_v, patch_w, patch_p
+         patch_rho, patch_u, patch_v, patch_w, patch_p, &
+         n_obstacles, obstacle_cube_lo, obstacle_cube_hi
 
       integer :: u, ios
 
@@ -170,6 +183,9 @@ contains
       patch_v     = p%patch_v
       patch_w     = p%patch_w
       patch_p     = p%patch_p
+      n_obstacles     = p%n_obstacles
+      obstacle_cube_lo = p%obstacle_cube_lo
+      obstacle_cube_hi = p%obstacle_cube_hi
 
       open(newunit=u, file=filename, status='old', action='read', iostat=ios)
       if (ios /= 0) then
@@ -228,6 +244,9 @@ contains
       p%patch_v     = patch_v
       p%patch_w     = patch_w
       p%patch_p     = patch_p
+      p%n_obstacles      = n_obstacles
+      p%obstacle_cube_lo = obstacle_cube_lo
+      p%obstacle_cube_hi = obstacle_cube_hi
    end subroutine read_namelist
 
    pure function bc_string_to_int(s) result(it)

@@ -3,6 +3,7 @@ module solver_driver
    use constants,        only : NVAR
    use mesh_types,       only : t_mesh, t_patch
    use partition,        only : partition_and_load
+   use cut_cell,         only : build_cut_cell_tables
    use fields,           only : t_state, alloc_state, free_state
    use bc_types,         only : t_bc_data
    use eos_ideal_gas,    only : cons_from_prim
@@ -40,6 +41,9 @@ contains
                     C_s=p%C_s, C_w=p%C_w, Pr_t=p%Pr_t)
 
       call partition_and_load(trim(p%mesh_file), ctx, mesh)
+      call build_cut_cell_tables(mesh, p%n_obstacles, &
+           p%obstacle_cube_lo(:, 1:max(p%n_obstacles,1)), &
+           p%obstacle_cube_hi(:, 1:max(p%n_obstacles,1)))
       call assign_patch_bcs(p, mesh, bc_dat)
       call alloc_state(s, mesh)
       call set_initial_condition(p, mesh, s, ctx)

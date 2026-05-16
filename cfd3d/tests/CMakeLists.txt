@@ -30,6 +30,9 @@ add_cfd3d_test(test_eos_jwl)
 add_cfd3d_test(test_cut_cell_geom)
 add_test(NAME test_cut_cell_geom
          COMMAND $<TARGET_FILE:test_cut_cell_geom>)
+add_cfd3d_test(test_cut_cell_build)
+add_test(NAME test_cut_cell_build
+         COMMAND $<TARGET_FILE:test_cut_cell_build>)
 add_cfd3d_test(test_blast_overpressure)
 add_cfd3d_test(test_blast_cube)
 add_cfd3d_test(test_blast_room)
