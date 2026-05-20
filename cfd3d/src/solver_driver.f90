@@ -43,7 +43,10 @@ contains
       call partition_and_load(trim(p%mesh_file), ctx, mesh)
       call build_cut_cell_tables(mesh, p%n_obstacles, &
            p%obstacle_cube_lo(:, 1:max(p%n_obstacles,1)), &
-           p%obstacle_cube_hi(:, 1:max(p%n_obstacles,1)))
+           p%obstacle_cube_hi(:, 1:max(p%n_obstacles,1)), &
+           n_shapes   = p%n_shapes, &
+           shape_kind = p%shape_kind(1:max(p%n_shapes,1)), &
+           shape_p    = p%shape_param(:, 1:max(p%n_shapes,1)))
       call assign_patch_bcs(p, mesh, bc_dat)
       call alloc_state(s, mesh)
       call set_initial_condition(p, mesh, s, ctx)

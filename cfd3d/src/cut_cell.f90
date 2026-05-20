@@ -16,11 +16,12 @@
 ! cells will simply see no overlap (or wrong overlap) and need a
 ! follow-up generalisation if mixed-element cut-cell is ever needed.
 module cut_cell
-   use kinds,         only : wp
-   use constants,     only : NVAR
-   use mesh_types,    only : t_mesh
-   use fields,        only : t_state
-   use cut_cell_geom, only : MAX_FRAGS_PER_CELL, cube_cell_intersection
+   use kinds,          only : wp
+   use constants,      only : NVAR
+   use mesh_types,     only : t_mesh
+   use fields,         only : t_state
+   use cut_cell_geom,  only : MAX_FRAGS_PER_CELL, cube_cell_intersection
+   use cut_cell_shapes, only : sampled_cell_deficit
    implicit none
    private
 
@@ -36,25 +37,37 @@ module cut_cell
    ! obstacle): flux-isolated, residual identically zero, kept frozen.
    real(wp), parameter, public :: V_DEAD_FRAC = 1.0e-8_wp
 
+   ! Curved-obstacle subsampling resolution (nsub^3 per cell).
+   integer, parameter :: NSUB = 16
+
 contains
 
-   subroutine build_cut_cell_tables(mesh, n_cubes, cube_lo, cube_hi)
+   subroutine build_cut_cell_tables(mesh, n_cubes, cube_lo, cube_hi, &
+                                    n_shapes, shape_kind, shape_p)
       type(t_mesh), intent(inout) :: mesh
       integer,      intent(in)    :: n_cubes
       real(wp),     intent(in)    :: cube_lo(:,:)   ! (3, n_cubes)
       real(wp),     intent(in)    :: cube_hi(:,:)   ! (3, n_cubes)
+      integer,  intent(in), optional :: n_shapes
+      integer,  intent(in), optional :: shape_kind(:)    ! (n_shapes)
+      real(wp), intent(in), optional :: shape_p(:,:)     ! (6, n_shapes)
 
-      integer  :: c, f, k, j, ax, sgn, idx
+      integer  :: c, f, k, j, ax, sgn, idx, nsh
       real(wp) :: cell_lo_c(3), cell_hi_c(3)
       real(wp) :: V_full, V_eff_c, A_full(6), A_eff_c(6)
       integer  :: nfrag_c
       real(wp) :: fn_c  (3, MAX_FRAGS_PER_CELL)
       real(wp) :: fa_c  (   MAX_FRAGS_PER_CELL)
       real(wp) :: fcen_c(3, MAX_FRAGS_PER_CELL)
+      real(wp) :: V_def, A_def(6), s_nrm(3), s_area, s_cen(3)
+      logical  :: s_has
       real(wp), allocatable :: A_eff_cell(:,:)         ! (6, nc_total)
       integer,  allocatable :: cell_nfrag(:)
       integer,  allocatable :: pos(:)
       integer  :: n_frags_total
+
+      nsh = 0
+      if (present(n_shapes)) nsh = n_shapes
 
       ! 1) Allocate / initialise the per-cell and per-face tables to the
       ! un-cut quantities. Subsequent passes only subtract from these.
@@ -88,6 +101,20 @@ contains
                   A_eff_cell(j, c) = A_eff_cell(j, c) - (A_full(j) - A_eff_c(j))
                end do
                cell_nfrag(c) = cell_nfrag(c) + nfrag_c
+            end if
+         end do
+
+         ! Curved shapes: subsampled deficit + single closure fragment.
+         do k = 1, nsh
+            call sampled_cell_deficit(cell_lo_c, cell_hi_c, shape_kind(k), &
+                 shape_p(:,k), NSUB, V_def, A_def)
+            if (V_def > 0.0_wp) then
+               mesh%cell_vol_eff(c) = mesh%cell_vol_eff(c) - V_def
+               do j = 1, 6
+                  A_eff_cell(j, c) = A_eff_cell(j, c) - A_def(j)
+               end do
+               call closure_fragment(A_def, cell_lo_c, cell_hi_c, s_has, s_nrm, s_area, s_cen)
+               if (s_has) cell_nfrag(c) = cell_nfrag(c) + 1
             end if
          end do
       end do
@@ -139,6 +166,19 @@ contains
                pos(c) = pos(c) + 1
             end do
          end do
+         do k = 1, nsh
+            call sampled_cell_deficit(cell_lo_c, cell_hi_c, shape_kind(k), &
+                 shape_p(:,k), NSUB, V_def, A_def)
+            if (V_def > 0.0_wp) then
+               call closure_fragment(A_def, cell_lo_c, cell_hi_c, s_has, s_nrm, s_area, s_cen)
+               if (s_has) then
+                  mesh%frag_normal  (:, pos(c)) = s_nrm
+                  mesh%frag_area    (   pos(c)) = s_area
+                  mesh%frag_centroid(:, pos(c)) = s_cen
+                  pos(c) = pos(c) + 1
+               end if
+            end if
+         end do
       end do
 
       deallocate(pos, cell_nfrag, A_eff_cell)
@@ -153,8 +193,35 @@ contains
          mesh%cell_merge_root(c) = c
          mesh%cell_merge_vol (c) = mesh%cell_vol_eff(c)
       end do
-      if (n_cubes > 0) call build_merge_groups(mesh, MERGE_ALPHA)
+      if (n_cubes > 0 .or. nsh > 0) call build_merge_groups(mesh, MERGE_ALPHA)
    end subroutine build_cut_cell_tables
+
+   ! Closure fragment for a cell from its per-axis-side area deficit
+   ! A_def (1:-x 2:+x 3:-y 4:+y 5:-z 6:+z). The obstacle-surface area
+   ! vector that closes the cell is Σ_faces deficit·n_face_outward; for a
+   ! slip wall at constant cell pressure this single planar fragment
+   ! carries the exact net pressure force on the (possibly curved)
+   ! obstacle surface inside the cell. Centroid is the cell centre
+   ! (unused at first order on cut cells).
+   pure subroutine closure_fragment(A_def, cell_lo, cell_hi, has_frag, nrm, area, cen)
+      real(wp), intent(in)  :: A_def(6), cell_lo(3), cell_hi(3)
+      logical,  intent(out) :: has_frag
+      real(wp), intent(out) :: nrm(3), area, cen(3)
+      real(wp) :: vec(3), mag
+      vec(1) = A_def(2) - A_def(1)
+      vec(2) = A_def(4) - A_def(3)
+      vec(3) = A_def(6) - A_def(5)
+      mag = sqrt(vec(1)*vec(1) + vec(2)*vec(2) + vec(3)*vec(3))
+      if (mag > 1.0e-14_wp) then
+         has_frag = .true.
+         nrm  = vec / mag
+         area = mag
+         cen  = 0.5_wp * (cell_lo + cell_hi)
+      else
+         has_frag = .false.
+         nrm = 0.0_wp; area = 0.0_wp; cen = 0.0_wp
+      end if
+   end subroutine closure_fragment
 
    ! Link each sliver cell (cut volume fraction < alpha) to the largest
    ! non-sliver LOCAL face-neighbour, then recompute per-group volumes.

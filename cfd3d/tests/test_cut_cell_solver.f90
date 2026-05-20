@@ -38,7 +38,7 @@ program test_cut_cell_solver
    type(t_bc_data), allocatable :: bc_dat(:)
    type(t_mpi_ctx)    :: ctx
    real(wp) :: t, dt
-   integer  :: step, c, fails, nobs
+   integer  :: step, c, fails, nobs, nsh
    integer  :: n_cut, n_dead, n_full
    real(wp) :: frac
    real(wp) :: mass0, ener0, mass1, ener1, dmass, dener
@@ -59,8 +59,12 @@ program test_cut_cell_solver
                  C_s=p%C_s, C_w=p%C_w, Pr_t=p%Pr_t)
    call partition_and_load(trim(p%mesh_file), ctx, mesh)
    nobs = max(p%n_obstacles, 1)
+   nsh  = max(p%n_shapes, 1)
    call build_cut_cell_tables(mesh, p%n_obstacles, &
-        p%obstacle_cube_lo(:, 1:nobs), p%obstacle_cube_hi(:, 1:nobs))
+        p%obstacle_cube_lo(:, 1:nobs), p%obstacle_cube_hi(:, 1:nobs), &
+        n_shapes   = p%n_shapes, &
+        shape_kind = p%shape_kind(1:nsh), &
+        shape_p    = p%shape_param(:, 1:nsh))
    call assign_patch_bcs(p, mesh, bc_dat)
    call alloc_state(s, mesh)
    call set_initial_condition(p, mesh, s, ctx)

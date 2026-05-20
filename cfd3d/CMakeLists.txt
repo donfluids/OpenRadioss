@@ -69,6 +69,7 @@ set(CFD3D_CORE_SOURCES
    src/probes.f90
    src/eos_jwl.f90
    src/cut_cell_geom.f90
+   src/cut_cell_shapes.f90
    src/cut_cell.f90
    src/partition.f90
    src/halo_exchange.f90

@@ -83,6 +83,15 @@ module solver_control
       integer  :: n_obstacles = 0
       real(wp) :: obstacle_cube_lo(3, MAX_OBSTACLES) = 0.0_wp
       real(wp) :: obstacle_cube_hi(3, MAX_OBSTACLES) = 0.0_wp
+
+      ! Curved obstacle shapes (sphere / axis-aligned cylinder), handled
+      ! by the cut-cell engine via subsampling. shape_kind: 1=sphere,
+      ! 2=cyl_x, 3=cyl_y, 4=cyl_z. shape_param(1:6,i) per cut_cell_shapes
+      ! conventions (sphere: centre + radius; cyl: axis point + radius +
+      ! lo/hi along the axis).
+      integer  :: n_shapes = 0
+      integer  :: shape_kind(MAX_OBSTACLES) = 0
+      real(wp) :: shape_param(6, MAX_OBSTACLES) = 0.0_wp
    end type t_run_params
 
 contains
@@ -122,6 +131,9 @@ contains
       integer  :: n_obstacles
       real(wp) :: obstacle_cube_lo(3, MAX_OBSTACLES)
       real(wp) :: obstacle_cube_hi(3, MAX_OBSTACLES)
+      integer  :: n_shapes
+      integer  :: shape_kind(MAX_OBSTACLES)
+      real(wp) :: shape_param(6, MAX_OBSTACLES)
 
       namelist /cfd3d/ mesh_file, case_name, output_dir, t_end, cfl, &
          output_interval, max_steps, init_type, diaphragm_axis, diaphragm_pos, &
@@ -133,7 +145,8 @@ contains
          ambient_p, ambient_rho, tnt_mass, tnt_specific_E, probes_file, &
          patch_count, patch_name, patch_bc, &
          patch_rho, patch_u, patch_v, patch_w, patch_p, &
-         n_obstacles, obstacle_cube_lo, obstacle_cube_hi
+         n_obstacles, obstacle_cube_lo, obstacle_cube_hi, &
+         n_shapes, shape_kind, shape_param
 
       integer :: u, ios
 
@@ -186,6 +199,9 @@ contains
       n_obstacles     = p%n_obstacles
       obstacle_cube_lo = p%obstacle_cube_lo
       obstacle_cube_hi = p%obstacle_cube_hi
+      n_shapes        = p%n_shapes
+      shape_kind      = p%shape_kind
+      shape_param     = p%shape_param
 
       open(newunit=u, file=filename, status='old', action='read', iostat=ios)
       if (ios /= 0) then
@@ -247,6 +263,9 @@ contains
       p%n_obstacles      = n_obstacles
       p%obstacle_cube_lo = obstacle_cube_lo
       p%obstacle_cube_hi = obstacle_cube_hi
+      p%n_shapes    = n_shapes
+      p%shape_kind  = shape_kind
+      p%shape_param = shape_param
    end subroutine read_namelist
 
    pure function bc_string_to_int(s) result(it)

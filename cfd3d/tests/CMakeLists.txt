@@ -257,6 +257,27 @@ add_test(NAME test_cut_cell_solver
 set_tests_properties(test_cut_cell_solver PROPERTIES
    DEPENDS generate_cut_cell_box_mesh)
 
+# Same conservation driver, but with a curved (spherical) obstacle
+# handled by subsampling + closure fragments.
+configure_file(
+   "${CFD3D_SOURCE_DIR}/cases/cut_cell_box/cut_cell_sphere.nml"
+   "${CUT_CELL_WORKDIR}/cut_cell_sphere.nml" COPYONLY)
+add_test(NAME test_cut_cell_sphere
+         COMMAND $<TARGET_FILE:test_cut_cell_solver> "${CUT_CELL_WORKDIR}/cut_cell_sphere.nml"
+         WORKING_DIRECTORY "${CUT_CELL_WORKDIR}")
+set_tests_properties(test_cut_cell_sphere PROPERTIES
+   DEPENDS generate_cut_cell_box_mesh)
+
+# Same driver with a z-aligned finite cylinder obstacle.
+configure_file(
+   "${CFD3D_SOURCE_DIR}/cases/cut_cell_box/cut_cell_cyl.nml"
+   "${CUT_CELL_WORKDIR}/cut_cell_cyl.nml" COPYONLY)
+add_test(NAME test_cut_cell_cyl
+         COMMAND $<TARGET_FILE:test_cut_cell_solver> "${CUT_CELL_WORKDIR}/cut_cell_cyl.nml"
+         WORKING_DIRECTORY "${CUT_CELL_WORKDIR}")
+set_tests_properties(test_cut_cell_cyl PROPERTIES
+   DEPENDS generate_cut_cell_box_mesh)
+
 # M2 parallel acceptance: same Sod case run on 4 ranks. The mesh is partitioned
 # via METIS, halos exchanged each RK stage, and the global L1 error vs. exact
 # Sod must satisfy the same 6 % threshold as serial.
