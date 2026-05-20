@@ -17,13 +17,24 @@
 ! follow-up generalisation if mixed-element cut-cell is ever needed.
 module cut_cell
    use kinds,         only : wp
+   use constants,     only : NVAR
    use mesh_types,    only : t_mesh
+   use fields,        only : t_state
    use cut_cell_geom, only : MAX_FRAGS_PER_CELL, cube_cell_intersection
    implicit none
    private
 
    public :: build_cut_cell_tables
    public :: get_axis_aligned_extent, classify_face_axis_side, axis_side_idx
+   public :: build_merge_groups, merge_fold_residual, merge_sync_state
+
+   ! A cell with cut volume fraction below this is a "sliver" and gets
+   ! merged into a larger neighbour for time-step stability.
+   real(wp), parameter, public :: MERGE_ALPHA = 0.5_wp
+
+   ! A cell with cut volume fraction below this is "dead" (fully inside an
+   ! obstacle): flux-isolated, residual identically zero, kept frozen.
+   real(wp), parameter, public :: V_DEAD_FRAC = 1.0e-8_wp
 
 contains
 
@@ -131,7 +142,153 @@ contains
       end do
 
       deallocate(pos, cell_nfrag, A_eff_cell)
+
+      ! 6) Merge groups: default each cell to its own group, then link
+      ! slivers to hosts. (No-op default when there are no cut cells.)
+      if (allocated(mesh%cell_merge_root)) deallocate(mesh%cell_merge_root)
+      if (allocated(mesh%cell_merge_vol))  deallocate(mesh%cell_merge_vol)
+      allocate(mesh%cell_merge_root(mesh%nc_total))
+      allocate(mesh%cell_merge_vol (mesh%nc_total))
+      do c = 1, mesh%nc_total
+         mesh%cell_merge_root(c) = c
+         mesh%cell_merge_vol (c) = mesh%cell_vol_eff(c)
+      end do
+      if (n_cubes > 0) call build_merge_groups(mesh, MERGE_ALPHA)
    end subroutine build_cut_cell_tables
+
+   ! Link each sliver cell (cut volume fraction < alpha) to the largest
+   ! non-sliver LOCAL face-neighbour, then recompute per-group volumes.
+   ! Single-level star merging — hosts are themselves non-slivers, so no
+   ! merge chains form. A sliver with no eligible host stays un-merged
+   ! (it keeps its small dt; a warning is printed once).
+   subroutine build_merge_groups(mesh, alpha)
+      type(t_mesh), intent(inout) :: mesh
+      real(wp),     intent(in)    :: alpha
+
+      integer  :: c, f, o, n, root, n_unmerged
+      real(wp), allocatable :: best_host_vol(:)
+      logical,  allocatable :: is_sliver(:)
+
+      allocate(is_sliver(mesh%nc_total), source=.false.)
+      do c = 1, mesh%nc_total
+         if (mesh%cell_volume(c) > 0.0_wp) then
+            is_sliver(c) = (mesh%cell_vol_eff(c) / mesh%cell_volume(c)) < alpha
+         end if
+      end do
+
+      ! Single pass over interior faces: for each sliver, track the
+      ! best (largest V_eff) non-sliver local neighbour as its host.
+      allocate(best_host_vol(mesh%nc_total), source=-1.0_wp)
+      do f = 1, mesh%nf_interior
+         o = mesh%face_owner(f)
+         n = mesh%face_neighbor(f)
+         if (n <= 0) cycle
+         call consider(o, n)
+         call consider(n, o)
+      end do
+
+      ! Recompute group volumes: accumulate each cell's V_eff onto its
+      ! root, then propagate the group total back to every member.
+      ! Count only LIVE slivers (not dead cells) that found no host —
+      ! those are the ones that keep a reduced dt.
+      n_unmerged = 0
+      do c = 1, mesh%nc_internal
+         if (is_sliver(c) .and. mesh%cell_merge_root(c) == c .and. &
+             mesh%cell_vol_eff(c) > V_DEAD_FRAC * mesh%cell_volume(c)) &
+            n_unmerged = n_unmerged + 1
+      end do
+      mesh%cell_merge_vol = 0.0_wp
+      do c = 1, mesh%nc_total
+         root = mesh%cell_merge_root(c)
+         mesh%cell_merge_vol(root) = mesh%cell_merge_vol(root) + mesh%cell_vol_eff(c)
+      end do
+      do c = 1, mesh%nc_total
+         mesh%cell_merge_vol(c) = mesh%cell_merge_vol(mesh%cell_merge_root(c))
+      end do
+
+      ! Dead cells (fully inside an obstacle, V_eff ~ 0) are flux-isolated
+      ! — all their faces have A_eff = 0 and they carry no fragments, so
+      ! their residual is identically zero. They cannot find a host (all
+      ! neighbours are dead or cut), so give them a safe nonzero
+      ! denominator (the full cell volume); with R = 0 they simply stay
+      ! frozen at their initial state and contribute nothing.
+      do c = 1, mesh%nc_total
+         if (mesh%cell_volume(c) > 0.0_wp) then
+            if (mesh%cell_vol_eff(c) <= V_DEAD_FRAC * mesh%cell_volume(c)) &
+               mesh%cell_merge_vol(c) = mesh%cell_volume(c)
+         end if
+      end do
+
+      if (n_unmerged > 0) &
+         write(*,'(A,I0,A)') 'cut_cell: warning — ', n_unmerged, &
+            ' sliver cell(s) had no eligible host; they keep a reduced dt'
+
+      deallocate(best_host_vol, is_sliver)
+
+   contains
+
+      ! If cell s is a sliver and cell h is a non-sliver local cell with
+      ! a larger V_eff than the current best, adopt h as s's host.
+      subroutine consider(s, h)
+         integer, intent(in) :: s, h
+         if (.not. is_sliver(s)) return
+         if (h > mesh%nc_internal) return     ! host must be locally owned
+         if (is_sliver(h)) return             ! host must be a non-sliver
+         if (mesh%cell_vol_eff(h) > best_host_vol(s)) then
+            best_host_vol(s) = mesh%cell_vol_eff(h)
+            mesh%cell_merge_root(s) = h
+         end if
+      end subroutine consider
+
+   end subroutine build_merge_groups
+
+   ! Fold each sliver's residual into its host (in place) so the host
+   ! carries the whole group's residual and slivers carry zero. The RK
+   ! update then advances every group member with R(root)/V_group.
+   subroutine merge_fold_residual(mesh, s)
+      type(t_mesh),  intent(in)    :: mesh
+      type(t_state), intent(inout) :: s
+      integer :: c, root
+      do c = 1, mesh%nc_internal
+         root = mesh%cell_merge_root(c)
+         if (root /= c) then
+            s%R(:, root) = s%R(:, root) + s%R(:, c)
+            s%R(:, c)    = 0.0_wp
+         end if
+      end do
+   end subroutine merge_fold_residual
+
+   ! Volume-weighted average each group's conserved state and assign it
+   ! to every member. Conserves Σ U·V_eff within each group. Call once
+   ! after the initial condition so merged members start coherent.
+   subroutine merge_sync_state(mesh, s)
+      type(t_mesh),  intent(in)    :: mesh
+      type(t_state), intent(inout) :: s
+      integer :: c, root
+      real(wp), allocatable :: Usum(:,:)
+      logical :: any_merge
+
+      any_merge = .false.
+      do c = 1, mesh%nc_internal
+         if (mesh%cell_merge_root(c) /= c) then
+            any_merge = .true.
+            exit
+         end if
+      end do
+      if (.not. any_merge) return
+
+      allocate(Usum(NVAR, mesh%nc_total), source=0.0_wp)
+      do c = 1, mesh%nc_internal
+         root = mesh%cell_merge_root(c)
+         Usum(:, root) = Usum(:, root) + s%U(:, c) * mesh%cell_vol_eff(c)
+      end do
+      do c = 1, mesh%nc_internal
+         root = mesh%cell_merge_root(c)
+         if (mesh%cell_merge_vol(root) > 0.0_wp) &
+            s%U(:, c) = Usum(:, root) / mesh%cell_merge_vol(root)
+      end do
+      deallocate(Usum)
+   end subroutine merge_sync_state
 
    ! Axis-aligned bounding box of a cell's vertex set.
    pure subroutine get_axis_aligned_extent(mesh, c, cell_lo, cell_hi)

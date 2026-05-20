@@ -12,6 +12,7 @@ module time_integration
    use flux_assembly, only : residual_begin, residual_pure_interior, &
                              residual_partition, residual_boundary, &
                              residual_fragments
+   use cut_cell,      only : merge_fold_residual
    use gradients,     only : compute_primitives, compute_gradients
    use limiters,      only : compute_venkat_limiter
    use halo_exchange, only : halo_pack_and_start, halo_wait, &
@@ -37,9 +38,10 @@ contains
       logical,         intent(in) :: viscous
       real(wp) :: dt
 
-      integer :: f, c, c_n
+      integer :: f, c, c_n, root
       real(wp) :: lam_face, area, lam_o, lam_n, cell_dt, dt_local, dt_global
       real(wp), allocatable :: lam_sum(:), visc_sum(:)
+      real(wp), allocatable :: lam_grp(:), visc_grp(:)
       real(wp) :: nrml(3)
       real(wp) :: rho, u, v, w, p, T, mu, kappa, kappa_o, kappa_n
       real(wp) :: dt_visc_cell
@@ -90,18 +92,31 @@ contains
          end if
       end do
 
+      ! Fold the per-face wave-speed / diffusivity sums into merge groups,
+      ! so a sliver cell's CFL uses the combined group volume rather than
+      ! its own tiny V_eff. Internal member-member faces are double-counted
+      ! in the fold, which only makes the bound more conservative.
+      allocate(lam_grp(mesh%nc_total),  source=0.0_wp)
+      allocate(visc_grp(mesh%nc_total), source=0.0_wp)
+      do c = 1, mesh%nc_internal
+         root = mesh%cell_merge_root(c)
+         lam_grp(root)  = lam_grp(root)  + lam_sum(c)
+         visc_grp(root) = visc_grp(root) + visc_sum(c)
+      end do
+
       dt_local = huge(1.0_wp)
       do c = 1, mesh%nc_internal
-         if (lam_sum(c) > 0.0_wp) then
-            cell_dt = cfl * mesh%cell_vol_eff(c) / lam_sum(c)
+         root = mesh%cell_merge_root(c)
+         if (lam_grp(root) > 0.0_wp) then
+            cell_dt = cfl * mesh%cell_merge_vol(c) / lam_grp(root)
             if (cell_dt < dt_local) dt_local = cell_dt
          end if
-         if (viscous .and. visc_sum(c) > 0.0_wp) then
-            dt_visc_cell = cfl * mesh%cell_vol_eff(c)**2 / visc_sum(c)
+         if (viscous .and. visc_grp(root) > 0.0_wp) then
+            dt_visc_cell = cfl * mesh%cell_merge_vol(c)**2 / visc_grp(root)
             if (dt_visc_cell < dt_local) dt_local = dt_visc_cell
          end if
       end do
-      deallocate(lam_sum, visc_sum)
+      deallocate(lam_sum, visc_sum, lam_grp, visc_grp)
 
       if (ctx%nproc > 1) then
          call MPI_Allreduce(dt_local, dt_global, 1, MPI_DOUBLE_PRECISION, &
@@ -124,30 +139,40 @@ contains
       logical,         intent(in)    :: muscl, viscous
       real(wp),        intent(in)    :: K_venkat
 
-      integer :: c
+      integer :: c, root
       real(wp) :: inv_V
 
       ! Stash U^n
       s%U0 = s%U
 
+      ! Each stage: compute residual, fold sliver residuals into hosts,
+      ! then advance every group member with R(root)/V_group. For un-cut
+      ! meshes merge_root(c)==c and cell_merge_vol(c)==cell_vol_eff(c),
+      ! so this reduces exactly to the plain per-cell update.
       call one_stage(mesh, bc_dat, s, ctx, muscl, viscous, K_venkat)
+      call merge_fold_residual(mesh, s)
       do c = 1, mesh%nc_internal
-         inv_V = 1.0_wp / mesh%cell_vol_eff(c)
-         s%U(:, c) = s%U0(:, c) - dt * inv_V * s%R(:, c)
+         root  = mesh%cell_merge_root(c)
+         inv_V = 1.0_wp / mesh%cell_merge_vol(c)
+         s%U(:, c) = s%U0(:, c) - dt * inv_V * s%R(:, root)
       end do
 
       call one_stage(mesh, bc_dat, s, ctx, muscl, viscous, K_venkat)
+      call merge_fold_residual(mesh, s)
       do c = 1, mesh%nc_internal
-         inv_V = 1.0_wp / mesh%cell_vol_eff(c)
+         root  = mesh%cell_merge_root(c)
+         inv_V = 1.0_wp / mesh%cell_merge_vol(c)
          s%U(:, c) = 0.75_wp * s%U0(:, c) &
-                   + 0.25_wp * ( s%U(:, c) - dt * inv_V * s%R(:, c) )
+                   + 0.25_wp * ( s%U(:, c) - dt * inv_V * s%R(:, root) )
       end do
 
       call one_stage(mesh, bc_dat, s, ctx, muscl, viscous, K_venkat)
+      call merge_fold_residual(mesh, s)
       do c = 1, mesh%nc_internal
-         inv_V = 1.0_wp / mesh%cell_vol_eff(c)
+         root  = mesh%cell_merge_root(c)
+         inv_V = 1.0_wp / mesh%cell_merge_vol(c)
          s%U(:, c) = (1.0_wp/3.0_wp) * s%U0(:, c) &
-                   + (2.0_wp/3.0_wp) * ( s%U(:, c) - dt * inv_V * s%R(:, c) )
+                   + (2.0_wp/3.0_wp) * ( s%U(:, c) - dt * inv_V * s%R(:, root) )
       end do
    end subroutine rk3_step
 

@@ -124,6 +124,17 @@ module mesh_types
       real(wp), allocatable :: frag_normal  (:,:)      ! (3, n_frags) outward from cell
       real(wp), allocatable :: frag_area    (:)        ! (n_frags)
       real(wp), allocatable :: frag_centroid(:,:)      ! (3, n_frags)
+
+      ! Cut-cell merging (Phase 1d). Sliver cells (cell_vol_eff/cell_volume
+      ! below a threshold) are linked to a larger non-sliver face-neighbor
+      ! ("host"). The group shares a single conserved state advanced with
+      ! the combined group volume, which restores a sane CFL time step.
+      !   cell_merge_root(c) = representative cell of c's group
+      !                        (= c for un-merged cells and for hosts)
+      !   cell_merge_vol (c) = total V_eff of c's group (= V_eff for
+      !                        un-merged cells)
+      integer,  allocatable :: cell_merge_root(:)      ! (nc_total)
+      real(wp), allocatable :: cell_merge_vol (:)      ! (nc_total)
    end type t_mesh
 
 contains

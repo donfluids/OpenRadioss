@@ -3,7 +3,7 @@ module solver_driver
    use constants,        only : NVAR
    use mesh_types,       only : t_mesh, t_patch
    use partition,        only : partition_and_load
-   use cut_cell,         only : build_cut_cell_tables
+   use cut_cell,         only : build_cut_cell_tables, merge_sync_state
    use fields,           only : t_state, alloc_state, free_state
    use bc_types,         only : t_bc_data
    use eos_ideal_gas,    only : cons_from_prim
@@ -47,6 +47,7 @@ contains
       call assign_patch_bcs(p, mesh, bc_dat)
       call alloc_state(s, mesh)
       call set_initial_condition(p, mesh, s, ctx)
+      call merge_sync_state(mesh, s)
       call halo_init_persistent(mesh, ctx)
       call halo_init_persistent_gp(mesh, ctx)
       call probes_load(trim(p%probes_file), trim(p%case_name), trim(p%output_dir), ctx, probes)

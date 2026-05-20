@@ -33,6 +33,7 @@ add_test(NAME test_cut_cell_geom
 add_cfd3d_test(test_cut_cell_build)
 add_test(NAME test_cut_cell_build
          COMMAND $<TARGET_FILE:test_cut_cell_build>)
+add_cfd3d_test(test_cut_cell_solver)
 add_cfd3d_test(test_blast_overpressure)
 add_cfd3d_test(test_blast_cube)
 add_cfd3d_test(test_blast_room)
@@ -237,6 +238,24 @@ add_test(NAME test_blast_l_room
          WORKING_DIRECTORY "${BLAST_L_ROOM_WORKDIR}")
 set_tests_properties(test_blast_l_room PROPERTIES
    DEPENDS generate_blast_l_room_mesh)
+
+# Phase 1e cut-cell conservation test: a PLAIN box mesh (all cells
+# present — no center-cutout) plus a namelist cube obstacle handled
+# analytically by the cut-cell engine. Closed box -> mass + energy
+# conserved to machine precision.
+set(CUT_CELL_WORKDIR "${CMAKE_CURRENT_BINARY_DIR}/cut_cell_box")
+file(MAKE_DIRECTORY "${CUT_CELL_WORKDIR}")
+configure_file(
+   "${CFD3D_SOURCE_DIR}/cases/cut_cell_box/cut_cell_box.nml"
+   "${CUT_CELL_WORKDIR}/cut_cell_box.nml" COPYONLY)
+add_test(NAME generate_cut_cell_box_mesh
+         COMMAND $<TARGET_FILE:gen_sod_mesh> 20 20 20 1.0 1.0 1.0 "${CUT_CELL_WORKDIR}/cut_cell_box.msh"
+         WORKING_DIRECTORY "${CUT_CELL_WORKDIR}")
+add_test(NAME test_cut_cell_solver
+         COMMAND $<TARGET_FILE:test_cut_cell_solver> "${CUT_CELL_WORKDIR}/cut_cell_box.nml"
+         WORKING_DIRECTORY "${CUT_CELL_WORKDIR}")
+set_tests_properties(test_cut_cell_solver PROPERTIES
+   DEPENDS generate_cut_cell_box_mesh)
 
 # M2 parallel acceptance: same Sod case run on 4 ranks. The mesh is partitioned
 # via METIS, halos exchanged each RK stage, and the global L1 error vs. exact
