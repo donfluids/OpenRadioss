@@ -10,7 +10,8 @@ module time_integration
    use sgs_model,      only : sgs_nu_t, sgs_filter_width
    use constants,      only : NPRIM
    use flux_assembly, only : residual_begin, residual_pure_interior, &
-                             residual_partition, residual_boundary
+                             residual_partition, residual_boundary, &
+                             residual_fragments
    use gradients,     only : compute_primitives, compute_gradients
    use limiters,      only : compute_venkat_limiter
    use halo_exchange, only : halo_pack_and_start, halo_wait, &
@@ -48,7 +49,7 @@ contains
 
       do f = 1, mesh%nf
          nrml = mesh%face_normal(:, f)
-         area = mesh%face_area(f)
+         area = mesh%face_area_eff(f)
          c    = mesh%face_owner(f)
          c_n  = mesh%face_neighbor(f)
          lam_o = max_wave_speed(s%U(:, c), nrml)
@@ -92,11 +93,11 @@ contains
       dt_local = huge(1.0_wp)
       do c = 1, mesh%nc_internal
          if (lam_sum(c) > 0.0_wp) then
-            cell_dt = cfl * mesh%cell_volume(c) / lam_sum(c)
+            cell_dt = cfl * mesh%cell_vol_eff(c) / lam_sum(c)
             if (cell_dt < dt_local) dt_local = cell_dt
          end if
          if (viscous .and. visc_sum(c) > 0.0_wp) then
-            dt_visc_cell = cfl * mesh%cell_volume(c)**2 / visc_sum(c)
+            dt_visc_cell = cfl * mesh%cell_vol_eff(c)**2 / visc_sum(c)
             if (dt_visc_cell < dt_local) dt_local = dt_visc_cell
          end if
       end do
@@ -131,20 +132,20 @@ contains
 
       call one_stage(mesh, bc_dat, s, ctx, muscl, viscous, K_venkat)
       do c = 1, mesh%nc_internal
-         inv_V = 1.0_wp / mesh%cell_volume(c)
+         inv_V = 1.0_wp / mesh%cell_vol_eff(c)
          s%U(:, c) = s%U0(:, c) - dt * inv_V * s%R(:, c)
       end do
 
       call one_stage(mesh, bc_dat, s, ctx, muscl, viscous, K_venkat)
       do c = 1, mesh%nc_internal
-         inv_V = 1.0_wp / mesh%cell_volume(c)
+         inv_V = 1.0_wp / mesh%cell_vol_eff(c)
          s%U(:, c) = 0.75_wp * s%U0(:, c) &
                    + 0.25_wp * ( s%U(:, c) - dt * inv_V * s%R(:, c) )
       end do
 
       call one_stage(mesh, bc_dat, s, ctx, muscl, viscous, K_venkat)
       do c = 1, mesh%nc_internal
-         inv_V = 1.0_wp / mesh%cell_volume(c)
+         inv_V = 1.0_wp / mesh%cell_vol_eff(c)
          s%U(:, c) = (1.0_wp/3.0_wp) * s%U0(:, c) &
                    + (2.0_wp/3.0_wp) * ( s%U(:, c) - dt * inv_V * s%R(:, c) )
       end do
@@ -183,11 +184,13 @@ contains
          call halo_wait_gp(mesh, s)
          call residual_partition(mesh, s, muscl, viscous)
          call residual_boundary(mesh, bc_dat, s, muscl, viscous)
+         call residual_fragments(mesh, s)
       else
          call residual_begin(s)
          call residual_pure_interior(mesh, s, .false., .false.)
          call residual_partition(mesh, s, .false., .false.)
          call residual_boundary(mesh, bc_dat, s, .false., .false.)
+         call residual_fragments(mesh, s)
       end if
    end subroutine one_stage
 

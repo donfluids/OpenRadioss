@@ -20,6 +20,7 @@ module partition
    use mesh_io_gmsh,  only : gmsh_read, t_bface_raw
    use mesh_topology, only : build_topology
    use mesh_metrics,  only : build_metrics
+   use cut_cell,      only : build_cut_cell_tables
    use metis_binding, only : c_idx, METIS_PartMeshDual_C, METIS_OK
    implicit none
    private
@@ -75,6 +76,17 @@ contains
 
       ! 7) Build halo descriptor (CSR send/recv lists + persistent MPI requests).
       call build_halo_desc(mesh, ctx)
+
+      ! 8) Default (identity) cut-cell tables so every mesh — including
+      !    those loaded directly by tests that don't go through run_case —
+      !    can be read by the solver. run_case overrides with the namelist
+      !    obstacle list right after this returns.
+      block
+         real(wp) :: no_cube_lo(3, 1), no_cube_hi(3, 1)
+         no_cube_lo = 0.0_wp
+         no_cube_hi = 0.0_wp
+         call build_cut_cell_tables(mesh, 0, no_cube_lo, no_cube_hi)
+      end block
 
       ! Cleanup global mesh
       deallocate(epart)
@@ -641,6 +653,12 @@ contains
       if (allocated(m%face_centroid)) deallocate(m%face_centroid)
       if (allocated(m%face_patch))    deallocate(m%face_patch)
       if (allocated(m%patches))       deallocate(m%patches)
+      if (allocated(m%cell_vol_eff))     deallocate(m%cell_vol_eff)
+      if (allocated(m%face_area_eff))    deallocate(m%face_area_eff)
+      if (allocated(m%cell_frag_offset)) deallocate(m%cell_frag_offset)
+      if (allocated(m%frag_normal))      deallocate(m%frag_normal)
+      if (allocated(m%frag_area))        deallocate(m%frag_area)
+      if (allocated(m%frag_centroid))    deallocate(m%frag_centroid)
    end subroutine free_mesh
 
 end module partition

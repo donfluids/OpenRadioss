@@ -20,6 +20,7 @@ module flux_assembly
    public :: compute_residual
    public :: residual_begin
    public :: residual_pure_interior, residual_partition, residual_boundary
+   public :: residual_fragments
 
 contains
 
@@ -96,7 +97,7 @@ contains
       c_o  = mesh%face_owner(ifc)
       c_n  = mesh%face_neighbor(ifc)
       nrml = mesh%face_normal(:, ifc)
-      area = mesh%face_area(ifc)
+      area = mesh%face_area_eff(ifc)
 
       drO = mesh%face_centroid(:, ifc) - mesh%cell_centroid(:, c_o)
       drN = mesh%face_centroid(:, ifc) - mesh%cell_centroid(:, c_n)
@@ -155,7 +156,7 @@ contains
          c_o  = mesh%face_owner(ifc)
          ip   = mesh%face_patch(ifc)
          nrml = mesh%face_normal(:, ifc)
-         area = mesh%face_area(ifc)
+         area = mesh%face_area_eff(ifc)
 
          drO = mesh%face_centroid(:, ifc) - mesh%cell_centroid(:, c_o)
 
@@ -204,5 +205,35 @@ contains
          s%R(:, c_o) = s%R(:, c_o) + Fflx * area
       end do
    end subroutine residual_boundary
+
+   ! Cut-cell obstacle-surface contribution. Each cut cell carries a set
+   ! of obstacle-surface fragments (analytic geometry from cut_cell_geom).
+   ! Each fragment is a slip wall: build the cell's conservative state,
+   ! reflect it about the fragment normal to form the ghost, and add the
+   ! HLLC flux × fragment area to the residual — exactly as a boundary
+   ! face, but the "face" is the interior obstacle surface inside the
+   ! cell. First-order state on cut cells (MUSCL on cut cells is Phase 2).
+   subroutine residual_fragments(mesh, s)
+      type(t_mesh),  intent(in)    :: mesh
+      type(t_state), intent(inout) :: s
+      integer  :: c, fr
+      real(wp) :: nrml(3), area
+      real(wp) :: W_L(NPRIM), Q_L(NVAR), Q_R(NVAR), Fflx(NVAR)
+      type(t_bc_data) :: wall_bc   ! unused by the slip-wall ghost state
+
+      if (mesh%n_frags == 0) return
+
+      do c = 1, mesh%nc_internal
+         do fr = mesh%cell_frag_offset(c), mesh%cell_frag_offset(c+1) - 1
+            nrml = mesh%frag_normal(:, fr)
+            area = mesh%frag_area(fr)
+            W_L  = s%W(:, c)
+            call cons_from_prim(W_L(IP_RHO), W_L(IP_U), W_L(IP_V), W_L(IP_W), W_L(IP_P), Q_L)
+            call ghost_state(BC_SLIP_WALL, wall_bc, Q_L, nrml, Q_R)
+            Fflx = hllc_flux(Q_L, Q_R, nrml)
+            s%R(:, c) = s%R(:, c) + Fflx * area
+         end do
+      end do
+   end subroutine residual_fragments
 
 end module flux_assembly
